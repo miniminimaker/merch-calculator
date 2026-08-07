@@ -445,6 +445,50 @@
         const handleDeletePkgItem = (spId, pkgId, itemId) => {
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: sp.packagings.map(p => p.id === pkgId ? { ...p, items: p.items.filter(i => i.id !== itemId) } : p) } : sp));
         };
+        const handleMoveItem = (spId, vendorId, itemId, direction) => {
+          setSalesPeriods(salesPeriods.map(sp => {
+            if (sp.id === spId && !sp.isLocked) {
+              const updatedVendors = sp.vendors.map(v => {
+                if (v.id === vendorId) {
+                  const items = [...v.items];
+                  const index = items.findIndex(i => i.id === itemId);
+                  if (index === -1) return v;
+                  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+                  if (targetIndex < 0 || targetIndex >= items.length) return v;
+                  const [movedItem] = items.splice(index, 1);
+                  items.splice(targetIndex, 0, movedItem);
+                  return { ...v, items };
+                }
+                return v;
+              });
+              return { ...sp, vendors: updatedVendors };
+            }
+            return sp;
+          }));
+        };
+
+        const handleMovePkgItem = (spId, pkgId, itemId, direction) => {
+          setSalesPeriods(salesPeriods.map(sp => {
+            if (sp.id === spId && !sp.isLocked) {
+              const updatedPkgs = sp.packagings.map(p => {
+                if (p.id === pkgId) {
+                  const items = [...p.items];
+                  const index = items.findIndex(i => i.id === itemId);
+                  if (index === -1) return p;
+                  const targetIndex = direction === 'up' ? index - 1 : index + 1;
+                  if (targetIndex < 0 || targetIndex >= items.length) return p;
+                  const [movedItem] = items.splice(index, 1);
+                  items.splice(targetIndex, 0, movedItem);
+                  return { ...p, items };
+                }
+                return p;
+              });
+              return { ...sp, packagings: updatedPkgs };
+            }
+            return sp;
+          }));
+        };
+
         const handlePkgItemFieldChange = (spId, pkgId, itemId, field, value) => {
           setSalesPeriods(salesPeriods.map(sp => {
             if (sp.id === spId && !sp.isLocked) {
@@ -785,14 +829,33 @@
                           </div>
 
                           <div className="p-3 sm:p-4 flex flex-col gap-3.5">
-                            {vendor.items.map((item) => (
+                            {vendor.items.map((item, itemIdx) => (
                               <div key={item.id} className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3 border border-slate-200">
                                 <div className="flex justify-between items-center gap-3 border-b border-slate-100 pb-2.5 flex-wrap">
                                   <div className="flex items-center gap-2 flex-grow">
                                     <span className="text-[12.7px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">品項</span>
                                     <input type="text" value={item.itemTitle} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'itemTitle', e.target.value)} className="rounded-lg px-2.5 py-1 font-bold text-[12.7px] w-full sm:w-56 border border-slate-200 bg-slate-50" />
                                   </div>
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                                      <button 
+                                        onClick={() => handleMoveItem(sp.id, vendor.id, item.id, 'up')} 
+                                        disabled={sp.isLocked || itemIdx === 0}
+                                        title="往上一格"
+                                        className="p-1 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-700 font-bold text-[11px]"
+                                      >
+                                        ▲
+                                      </button>
+                                      <button 
+                                        onClick={() => handleMoveItem(sp.id, vendor.id, item.id, 'down')} 
+                                        disabled={sp.isLocked || itemIdx === vendor.items.length - 1}
+                                        title="往下一格"
+                                        className="p-1 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-700 font-bold text-[11px]"
+                                      >
+                                        ▼
+                                      </button>
+                                    </div>
+
                                     <label className="flex items-center gap-1.5 text-[12.7px] font-semibold text-slate-600 cursor-pointer select-none">
                                       <input 
                                         type="checkbox" 
@@ -871,14 +934,33 @@
                           </div>
 
                           <div className="p-3 sm:p-4 flex flex-col gap-3.5">
-                            {(pkgVendor.items || []).map((pkg) => (
+                            {(pkgVendor.items || []).map((pkg, pkgIdx) => (
                               <div key={pkg.id} className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3 border border-slate-200">
                                 <div className="flex justify-between items-center gap-3 border-b border-slate-100 pb-2.5 flex-wrap">
                                   <div className="flex items-center gap-2 flex-grow">
                                     <span className="text-[12.7px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">品項</span>
                                     <input type="text" value={pkg.packagingTitle} disabled={sp.isLocked} onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'packagingTitle', e.target.value)} className="rounded-lg px-2.5 py-1 font-bold text-[12.7px] w-full sm:w-56 border border-slate-200 bg-slate-50" />
                                   </div>
-                                  <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                                      <button 
+                                        onClick={() => handleMovePkgItem(sp.id, pkgVendor.id, pkg.id, 'up')} 
+                                        disabled={sp.isLocked || pkgIdx === 0}
+                                        title="往上一格"
+                                        className="p-1 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-700 font-bold text-[11px]"
+                                      >
+                                        ▲
+                                      </button>
+                                      <button 
+                                        onClick={() => handleMovePkgItem(sp.id, pkgVendor.id, pkg.id, 'down')} 
+                                        disabled={sp.isLocked || pkgIdx === pkgVendor.items.length - 1}
+                                        title="往下一格"
+                                        className="p-1 hover:bg-slate-200 rounded disabled:opacity-30 text-slate-700 font-bold text-[11px]"
+                                      >
+                                        ▼
+                                      </button>
+                                    </div>
+
                                     <label className="flex items-center gap-1.5 text-[12.7px] font-semibold text-slate-600 cursor-pointer select-none">
                                       <input 
                                         type="checkbox" 
