@@ -180,6 +180,9 @@
         const [googleSheetUrl, setGoogleSheetUrl] = useState(() => {
           return localStorage.getItem('moc_googleSheetUrl') || '';
         });
+        const [gasWebappUrl, setGasWebappUrl] = useState(() => {
+          return localStorage.getItem('moc_gasWebappUrl') || '';
+        });
 
         const [selectedExportIds, setSelectedExportIds] = useState({});
         const [exportNotice, setExportNotice] = useState('');
@@ -241,6 +244,24 @@
         const lastSyncedPayloadRef = useRef(null);
         const lastUpdatedRef = useRef(new Date().toISOString());
 
+        // Helper to sync with Google Apps Script Web App
+        const syncToGoogleAppsScript = async (payload) => {
+          const currentGasUrl = localStorage.getItem('moc_gasWebappUrl') || gasWebappUrl;
+          if (!currentGasUrl || !currentGasUrl.trim()) return;
+          try {
+            await fetch(currentGasUrl.trim(), {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(payload)
+            });
+          } catch (err) {
+            console.error("Google Apps Script sync error:", err);
+          }
+        };
+
         useEffect(() => {
           const checkFirebaseReady = () => {
             if (window.firebaseService) {
@@ -278,6 +299,10 @@
                           setGoogleSheetUrl(remoteData.googleSheetUrl);
                           localStorage.setItem('moc_googleSheetUrl', remoteData.googleSheetUrl);
                         }
+                        if (remoteData.gasWebappUrl !== undefined) {
+                          setGasWebappUrl(remoteData.gasWebappUrl);
+                          localStorage.setItem('moc_gasWebappUrl', remoteData.gasWebappUrl);
+                        }
                         lastUpdatedRef.current = remoteLastUpdated;
                         localStorage.setItem('moc_lastUpdated', remoteLastUpdated);
                       } else {
@@ -286,6 +311,7 @@
                           exchangeRate,
                           theme,
                           googleSheetUrl,
+                          gasWebappUrl,
                           lastUpdated: localLastUpdated
                         };
                         await setDoc(userDocRef, currentPayload);
@@ -298,6 +324,7 @@
                         exchangeRate,
                         theme,
                         googleSheetUrl,
+                        gasWebappUrl,
                         lastUpdated: lastUpdatedRef.current
                       };
                       await setDoc(userDocRef, currentPayload);
@@ -370,6 +397,7 @@
           localStorage.setItem('moc_theme', JSON.stringify(theme));
           localStorage.setItem('moc_salesPeriods', JSON.stringify(salesPeriods));
           localStorage.setItem('moc_googleSheetUrl', googleSheetUrl);
+          localStorage.setItem('moc_gasWebappUrl', gasWebappUrl);
           
           const nowIso = new Date().toISOString();
           lastUpdatedRef.current = nowIso;
@@ -378,16 +406,20 @@
           const timeStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
           setLastSavedTime(timeStr);
 
-          if (user && !isRemoteLoading.current && window.firebaseService) {
-            const payload = {
-              salesPeriods,
-              exchangeRate,
-              theme,
-              googleSheetUrl,
-              lastUpdated: nowIso
-            };
-            const payloadString = JSON.stringify(payload);
+          const payload = {
+            salesPeriods,
+            exchangeRate,
+            theme,
+            googleSheetUrl,
+            gasWebappUrl,
+            lastUpdated: nowIso
+          };
+          const payloadString = JSON.stringify(payload);
 
+          // Always trigger Google Apps Script sync on state change if GAS URL is provided
+          syncToGoogleAppsScript(payload);
+
+          if (user && !isRemoteLoading.current && window.firebaseService) {
             if (lastSyncedPayloadRef.current !== payloadString) {
               const { db, doc, setDoc } = window.firebaseService;
               setSyncStatus('Syncing...');
@@ -402,7 +434,7 @@
                 });
             }
           }
-        }, [exchangeRate, theme, salesPeriods, googleSheetUrl, user]);
+        }, [exchangeRate, theme, salesPeriods, googleSheetUrl, gasWebappUrl, user]);
 
         const handleAddSalesPeriod = () => {
           const newSp = {
@@ -761,7 +793,8 @@
             exchangeRate,
             theme,
             salesPeriods,
-            googleSheetUrl
+            googleSheetUrl,
+            gasWebappUrl
           };
           const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8;' });
           const url = URL.createObjectURL(blob);
@@ -785,6 +818,7 @@
                 if (parsed.exchangeRate !== undefined) setExchangeRate(parsed.exchangeRate);
                 if (parsed.theme) setTheme(parsed.theme);
                 if (parsed.googleSheetUrl !== undefined) setGoogleSheetUrl(parsed.googleSheetUrl);
+                if (parsed.gasWebappUrl !== undefined) setGasWebappUrl(parsed.gasWebappUrl);
                 setExportNotice('JSON 匯入成功！');
               } else {
                 setExportNotice('JSON 格式錯誤：找不到有效場次資料');
@@ -843,6 +877,7 @@
 
                 const totalSalesQty = taiwanSalesQty + overseasSalesQty;
                 const totalSalesAmount = taiwanRevenue + overseasRevenue;
+                const profitAndLoss = totalSalesAmount - totalAmount;
 
                 periodTotalSales += totalSalesAmount;
 
@@ -855,7 +890,8 @@
                   usdToTwd,
                   overseasRevenue,
                   totalSalesQty,
-                  totalSalesAmount
+                  totalSalesAmount,
+                  profitAndLoss
                 };
               });
 
@@ -1016,7 +1052,7 @@
               {showGoogleSheets && (
                 <div className="p-4 sm:p-5 bg-slate-50 border-b border-slate-200 flex flex-col gap-4 animate-fade-in text-[12.7px] font-sans">
                   <div className="flex justify-between items-center border-b border-slate-200 pb-3 font-sans">
-                    <h3 className="font-bold text-slate-800 text-[14.7px] flex items-center gap-2 font-sans">📊 線上 Google 雲端表格即時檢視</h3>
+                    <h3 className="font-bold text-slate-800 text-[14.7px] flex items-center gap-2 font-sans">📊 線上 Google 雲端表格即時檢視與自動同步</h3>
                     <button 
                       onClick={() => setShowGoogleSheets(false)}
                       className="text-[12.7px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-xl font-semibold transition-colors font-sans"
@@ -1027,17 +1063,28 @@
 
                   <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-3">
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                      <label className="font-bold text-slate-700 whitespace-nowrap">Google 試算表連結 / 嵌入網址 (Embed URL)：</label>
+                      <label className="font-bold text-slate-700 whitespace-nowrap">Google 試算表連結 / 嵌入網址：</label>
                       <input 
                         type="text" 
                         value={googleSheetUrl}
                         onChange={(e) => setGoogleSheetUrl(e.target.value)}
-                        placeholder="請貼上 Google 試算表的共用嵌入連結 (例如: https://docs.google.com/spreadsheets/d/.../edit?usp=sharing 或 pubhtml 連結)" 
+                        placeholder="請貼上 Google 試算表的共用嵌入連結 (pubhtml 網址)" 
+                        className="flex-grow px-3 py-2 rounded-xl border border-slate-300 outline-none text-slate-800 text-[12.7px] bg-slate-50 focus:bg-white"
+                      />
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-slate-100">
+                      <label className="font-bold text-slate-700 whitespace-nowrap">Google Apps Script Web App URL：</label>
+                      <input 
+                        type="text" 
+                        value={gasWebappUrl}
+                        onChange={(e) => setGasWebappUrl(e.target.value)}
+                        placeholder="請輸入部署好的 Apps Script Web App 網址 (https://script.google.com/macros/s/.../exec)" 
                         className="flex-grow px-3 py-2 rounded-xl border border-slate-300 outline-none text-slate-800 text-[12.7px] bg-slate-50 focus:bg-white"
                       />
                     </div>
                     <p className="text-[11.7px] text-slate-500">
-                      💡 <strong>提示：</strong>在 Google 試算表中點擊 <code>檔案 > 共用 > 發佈到網路</code>，選擇「網頁」並複製嵌入程式碼中的 <code>src="..."</code> 網址貼至上方即可直接在畫面上即時連線檢視與編輯。
+                      💡 <strong>提示：</strong>當資料變更並成功寫入 Firestore 後，系統會自動 POST JSON 資料至上方填寫的 Google Apps Script Web App URL 以同步更新 Google 試算表。
                     </p>
                   </div>
 
@@ -1540,16 +1587,41 @@
 
                                   </div>
 
-                                  {/* Total Summary Bar for Item */}
-                                  <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100 text-[12.7px] font-sans">
-                                    <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
+                                  {/* Unified 4-Card Summary Bar for Item */}
+                                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 pt-2 border-t border-slate-100 text-[12.7px] font-sans">
+                                    
+                                    {/* 1. 總銷售數量 */}
+                                    <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">總銷售數量：</span>
-                                      <span className="font-bold text-[14.7px]" style={{ color: theme.qtyTextColor }}>{item.totalSalesQty} </span>
+                                      <span className="font-bold text-[14.7px]" style={{ color: theme.qtyTextColor }}>{item.totalSalesQty}</span>
                                     </div>
-                                    <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200">
-                                      <span className="font-semibold text-slate-600">總銷售額：</span>
+
+                                    {/* 2. 總收入 */}
+                                    <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
+                                      <span className="font-semibold text-slate-600">總收入：</span>
                                       <span className="font-bold text-[14.7px]" style={{ color: theme.salesTextColor }}>{formatCurrency(item.totalSalesAmount)}</span>
                                     </div>
+
+                                    {/* 3. 總成本 */}
+                                    <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
+                                      <span className="font-semibold text-slate-600">總成本：</span>
+                                      <span className="font-bold text-[14.7px]" style={{ color: theme.inputTextColor }}>{formatCurrency(item.totalAmount)}</span>
+                                    </div>
+
+                                    {/* 4. 商品狀態 / 損益 */}
+                                    <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
+                                      <span className="font-semibold text-slate-600">損益：</span>
+                                      <span className="font-bold text-[14.7px]">
+                                        {item.profitAndLoss < 0 ? (
+                                          <span className="text-red-600">-{formatCurrency(Math.abs(item.profitAndLoss))}</span>
+                                        ) : item.profitAndLoss === 0 ? (
+                                          <span className="text-emerald-600">{formatCurrency(0)}</span>
+                                        ) : (
+                                          <span className="text-emerald-600">+{formatCurrency(item.profitAndLoss)}</span>
+                                        )}
+                                      </span>
+                                    </div>
+
                                   </div>
 
                                 </div>
