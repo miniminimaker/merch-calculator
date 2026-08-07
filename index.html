@@ -37,7 +37,6 @@
       const db = getFirestore(app);
       const googleProvider = new GoogleAuthProvider();
 
-      // 同步寫入或刪除 Google Apps Script 資料
       window.syncToGoogleAppsScript = async (payload, customGasUrl) => {
         const currentGasUrl = customGasUrl || localStorage.getItem('moc_gasWebappUrl') || '';
         if (!currentGasUrl || !currentGasUrl.trim()) return;
@@ -57,7 +56,6 @@
         }
       };
 
-      // 從 Google Apps Script 讀取雲端試算表裡的存檔清單
       window.fetchGoogleSheetVersions = async (customGasUrl) => {
         const currentGasUrl = customGasUrl || localStorage.getItem('moc_gasWebappUrl') || '';
         if (!currentGasUrl || !currentGasUrl.trim()) throw new Error("請先填寫 Google Apps Script 網址");
@@ -305,7 +303,6 @@
           setTimeout(() => setExportNotice(''), 4000);
         };
 
-        // 刪除 Google 試算表中的指定版本
         const handleDeleteCloudVersion = async (ver) => {
           if (!user) {
             alert("請先登入 Google 帳號！");
@@ -319,7 +316,6 @@
             setSyncStatus('Synced');
             setExportNotice(`已成功從 Google 試算表中刪除：${ver.title}`);
             setTimeout(() => setExportNotice(''), 4000);
-            // 重新讀取清單
             handleLoadGoogleSheetVersions();
           } catch (err) {
             alert("刪除失敗：" + err.message);
@@ -370,7 +366,7 @@
             alert("請先登入 Google 帳號！");
             return;
           }
-          const newTitle = prompt("請輸入新試算表/場次標題名稱：", `成本試算表_${new Date().toLocaleDateString()}`);
+          const newTitle = prompt("請輸入新試算表/標題名稱：", `成本試算表_${new Date().toLocaleDateString()}`);
           if (!newTitle) return;
 
           const newId = 'sheet_' + Date.now();
@@ -386,7 +382,7 @@
         const handleAddSalesPeriod = () => {
           const newSp = {
             id: Date.now(), isLocked: false, preorderTime: '', productionTime: '',
-            vendors: [{ id: Date.now() + 1, vendorName: '', shippingCost: '', items: [{ id: Date.now() + 2, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] }],
+            vendors: [{ id: Date.now() + 1, vendorName: '', shippingCost: '', items: [{ id: Date.now() + 2, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '', excludeFromTotal: false }] }],
             packagings: []
           };
           setSalesPeriods([...salesPeriods, newSp]);
@@ -397,7 +393,7 @@
         const handleSalesPeriodFieldChange = (spId, field, value) => { setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, [field]: value } : sp)); };
         
         const handleAddVendor = (spId) => {
-          const newVendor = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] };
+          const newVendor = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '', excludeFromTotal: false }] };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, vendors: [...sp.vendors, newVendor] } : sp));
         };
         const handleDeleteVendor = (spId, vendorId) => { setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, vendors: sp.vendors.filter(v => v.id !== vendorId) } : sp)); };
@@ -412,7 +408,7 @@
         };
 
         const handleAddItem = (spId, vendorId) => {
-          const newItem = { id: Date.now(), itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' };
+          const newItem = { id: Date.now(), itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '', excludeFromTotal: false };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, vendors: sp.vendors.map(v => v.id === vendorId ? { ...v, items: [...v.items, newItem] } : v) } : sp));
         };
         const handleDeleteItem = (spId, vendorId, itemId) => {
@@ -435,7 +431,7 @@
         };
 
         const handleAddPackaging = (spId) => {
-          const newPkg = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '', otherFee: '' }] };
+          const newPkg = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '', otherFee: '', excludeFromTotal: false }] };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: [...(sp.packagings || []), newPkg] } : sp));
         };
         const handleDeletePackaging = (spId, pkgId) => { setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: sp.packagings.filter(p => p.id !== pkgId) } : sp)); };
@@ -443,7 +439,7 @@
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: sp.packagings.map(p => p.id === pkgId ? { ...p, [field]: value } : p) } : sp));
         };
         const handleAddPkgItem = (spId, pkgId) => {
-          const newItem = { id: Date.now(), packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '', otherFee: '' };
+          const newItem = { id: Date.now(), packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '', otherFee: '', excludeFromTotal: false };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: sp.packagings.map(p => p.id === pkgId ? { ...p, items: [...(p.items || []), newItem] } : p) } : sp));
         };
         const handleDeletePkgItem = (spId, pkgId, itemId) => {
@@ -480,11 +476,22 @@
                 const totalCost = (printQty * unitCost) + otherFee;
                 return { ...item, printQty, unitCost, otherFee, totalCost };
               });
-              const totalVendorItemsAmount = rawItems.reduce((sum, item) => sum + item.totalCost, 0);
+              
+              // 僅計算未被排除的品項總成本來分攤運費及計算總成本
+              const activeVendorItems = rawItems.filter(item => !item.excludeFromTotal);
+              const totalVendorItemsAmount = activeVendorItems.reduce((sum, item) => sum + item.totalCost, 0);
+              
+              // 廠商運費與有效品項成本計入總成本
               periodTotalCost += totalVendorItemsAmount + vendorShipping;
 
               const calculatedItems = rawItems.map(item => {
-                let itemShipping = totalVendorItemsAmount > 0 ? vendorShipping * (item.totalCost / totalVendorItemsAmount) : (vendor.items.length > 0 ? vendorShipping / vendor.items.length : 0);
+                let itemShipping = 0;
+                if (!item.excludeFromTotal && totalVendorItemsAmount > 0) {
+                  itemShipping = vendorShipping * (item.totalCost / totalVendorItemsAmount);
+                } else if (!item.excludeFromTotal && activeVendorItems.length > 0) {
+                  itemShipping = vendorShipping / activeVendorItems.length;
+                }
+                
                 const totalCost = item.totalCost + itemShipping;
 
                 const twdPrice = parseFloat(item.twdPrice) || 0;
@@ -500,7 +507,9 @@
                 const totalRevenue = taiwanRevenue + overseasRevenue;
                 const profitAndLoss = totalRevenue - totalCost;
 
-                periodTotalSales += totalRevenue;
+                if (!item.excludeFromTotal) {
+                  periodTotalSales += totalRevenue;
+                }
                 return { ...item, shippingCost: itemShipping, taiwanRevenue, usdToTwd, overseasRevenue, totalSalesQty, totalRevenue, profitAndLoss };
               });
               return { ...vendor, items: calculatedItems };
@@ -516,11 +525,18 @@
                 const totalCost = (qty * unitCost) + otherFee;
                 return { ...item, qty, unitCost, otherFee, totalCost };
               });
-              const totalPkgItemsAmount = rawPkgItems.reduce((sum, item) => sum + item.totalCost, 0);
+
+              const activePkgItems = rawPkgItems.filter(item => !item.excludeFromTotal);
+              const totalPkgItemsAmount = activePkgItems.reduce((sum, item) => sum + item.totalCost, 0);
               periodTotalCost += totalPkgItemsAmount + vendorShipping;
 
               const calculatedPkgItems = rawPkgItems.map(item => {
-                let itemShipping = totalPkgItemsAmount > 0 ? vendorShipping * (item.totalCost / totalPkgItemsAmount) : (itemsList.length > 0 ? vendorShipping / itemsList.length : 0);
+                let itemShipping = 0;
+                if (!item.excludeFromTotal && totalPkgItemsAmount > 0) {
+                  itemShipping = vendorShipping * (item.totalCost / totalPkgItemsAmount);
+                } else if (!item.excludeFromTotal && activePkgItems.length > 0) {
+                  itemShipping = vendorShipping / activePkgItems.length;
+                }
                 return { ...item, shippingCost: itemShipping, totalCost: item.totalCost + itemShipping };
               });
               return { ...pkgVendor, items: calculatedPkgItems };
@@ -575,7 +591,7 @@
                     onClick={handleAddSalesPeriod}
                     className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-[12.7px] font-bold transition-all shadow-md font-sans border border-slate-700"
                   >
-                    <Icons.Plus /> 新增場次
+                    <Icons.Plus /> 新增販售
                   </button>
                 </div>
               </div>
@@ -771,12 +787,24 @@
                           <div className="p-3 sm:p-4 flex flex-col gap-3.5">
                             {vendor.items.map((item) => (
                               <div key={item.id} className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3 border border-slate-200">
-                                <div className="flex justify-between items-center gap-3 border-b border-slate-100 pb-2.5">
+                                <div className="flex justify-between items-center gap-3 border-b border-slate-100 pb-2.5 flex-wrap">
                                   <div className="flex items-center gap-2 flex-grow">
                                     <span className="text-[12.7px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">品項</span>
                                     <input type="text" value={item.itemTitle} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'itemTitle', e.target.value)} className="rounded-lg px-2.5 py-1 font-bold text-[12.7px] w-full sm:w-56 border border-slate-200 bg-slate-50" placeholder="品項名稱" />
                                   </div>
-                                  <button onClick={() => handleDeleteItem(sp.id, vendor.id, item.id)} disabled={sp.isLocked} className="text-slate-400 hover:text-red-600 p-1"><Icons.Trash /></button>
+                                  <div className="flex items-center gap-3">
+                                    <label className="flex items-center gap-1.5 text-[12.7px] font-semibold text-slate-600 cursor-pointer select-none">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={item.excludeFromTotal} 
+                                        disabled={sp.isLocked}
+                                        onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'excludeFromTotal', e.target.checked)}
+                                        className="w-4 h-4 accent-slate-900 rounded cursor-pointer"
+                                      />
+                                      <span>不計入總額</span>
+                                    </label>
+                                    <button onClick={() => handleDeleteItem(sp.id, vendor.id, item.id)} disabled={sp.isLocked} className="text-slate-400 hover:text-red-600 p-1"><Icons.Trash /></button>
+                                  </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
@@ -788,7 +816,7 @@
 
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                                   <div className="bg-blue-50/40 p-2.5 rounded-xl border border-blue-100"><label className="block font-bold mb-1 text-blue-700 text-[11.7px]">印製數量</label><input type="text" inputMode="decimal" value={item.printQty} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'printQty', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-bold" /></div>
-                                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200"><label className="block font-bold mb-1 text-slate-700 text-[11.7px]">成本單價</label><input type="text" inputMode="decimal" value={item.unitCost} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'unitCost', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-bold" /></div>
+                                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200"><label className="block font-bold mb-1 text-slate-700 text-[11.7px]">單價成本</label><input type="text" inputMode="decimal" value={item.unitCost} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'unitCost', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-bold" /></div>
                                   <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200"><label className="block font-bold mb-1 text-slate-700 text-[11.7px]">其他費用</label><input type="text" inputMode="decimal" value={item.otherFee} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'otherFee', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-bold" /></div>
                                 </div>
 
@@ -845,12 +873,24 @@
                           <div className="p-3 sm:p-4 flex flex-col gap-3.5">
                             {(pkgVendor.items || []).map((pkg) => (
                               <div key={pkg.id} className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3 border border-slate-200">
-                                <div className="flex justify-between items-center gap-3 border-b border-slate-100 pb-2.5">
+                                <div className="flex justify-between items-center gap-3 border-b border-slate-100 pb-2.5 flex-wrap">
                                   <div className="flex items-center gap-2 flex-grow">
                                     <span className="text-[12.7px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">品項</span>
                                     <input type="text" value={pkg.packagingTitle} disabled={sp.isLocked} onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'packagingTitle', e.target.value)} className="rounded-lg px-2.5 py-1 font-bold text-[12.7px] w-full sm:w-56 border border-slate-200 bg-slate-50" placeholder="包材名稱" />
                                   </div>
-                                  <button onClick={() => handleDeletePkgItem(sp.id, pkgVendor.id, pkg.id)} disabled={sp.isLocked} className="text-slate-400 hover:text-red-600 p-1"><Icons.Trash /></button>
+                                  <div className="flex items-center gap-3">
+                                    <label className="flex items-center gap-1.5 text-[12.7px] font-semibold text-slate-600 cursor-pointer select-none">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={pkg.excludeFromTotal} 
+                                        disabled={sp.isLocked}
+                                        onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'excludeFromTotal', e.target.checked)}
+                                        className="w-4 h-4 accent-slate-900 rounded cursor-pointer"
+                                      />
+                                      <span>不計入總額</span>
+                                    </label>
+                                    <button onClick={() => handleDeletePkgItem(sp.id, pkgVendor.id, pkg.id)} disabled={sp.isLocked} className="text-slate-400 hover:text-red-600 p-1"><Icons.Trash /></button>
+                                  </div>
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
@@ -871,7 +911,7 @@
                     {/* Summary Footer */}
                     <div className="p-4 sm:p-5 bg-slate-100 flex flex-col md:flex-row justify-between items-center gap-3 font-bold border-t border-slate-200 text-[12.7px] sm:text-[14.7px]">
                       <div className="flex items-center gap-2 text-slate-800">
-                        <span>📦 本場次總銷售額：</span>
+                        <span>📦 本次總銷售額：</span>
                         <span className="text-emerald-600 text-[14.7px] sm:text-[16.7px] font-extrabold">{formatCurrency(sp.periodTotalSales)}</span>
                       </div>
                       <div className="flex items-center gap-2">
