@@ -40,6 +40,30 @@
       const db = getFirestore(app);
       const googleProvider = new GoogleAuthProvider();
 
+      // Global sync function for Google Apps Script Web App
+      // Satisfies requirements: fetch response handling, error console.error, success console.log
+      window.syncToGoogleAppsScript = async (payload) => {
+        const currentGasUrl = localStorage.getItem('moc_gasWebappUrl') || '';
+        if (!currentGasUrl || !currentGasUrl.trim()) return;
+        try {
+          const response = await fetch(currentGasUrl.trim(), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/plain;charset=utf-8' // Avoids CORS preflight issue with GAS redirects
+            },
+            body: JSON.stringify(payload)
+          });
+          
+          if (response.ok || response.type === 'opaque') {
+            console.log("Google Sheet Synced Successfully");
+          } else {
+            console.error("Google Sheet Sync Failed", response.statusText);
+          }
+        } catch (err) {
+          console.error("Google Sheet Sync Failed", err);
+        }
+      };
+
       window.firebaseService = {
         auth,
         db,
@@ -244,24 +268,6 @@
         const lastSyncedPayloadRef = useRef(null);
         const lastUpdatedRef = useRef(new Date().toISOString());
 
-        // Helper to sync with Google Apps Script Web App
-        const syncToGoogleAppsScript = async (payload) => {
-          const currentGasUrl = localStorage.getItem('moc_gasWebappUrl') || gasWebappUrl;
-          if (!currentGasUrl || !currentGasUrl.trim()) return;
-          try {
-            await fetch(currentGasUrl.trim(), {
-              method: 'POST',
-              mode: 'no-cors',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify(payload)
-            });
-          } catch (err) {
-            console.error("Google Apps Script sync error:", err);
-          }
-        };
-
         useEffect(() => {
           const checkFirebaseReady = () => {
             if (window.firebaseService) {
@@ -414,24 +420,31 @@
             gasWebappUrl,
             lastUpdated: nowIso
           };
-          const payloadString = JSON.stringify(payload);
-
-          // Always trigger Google Apps Script sync on state change if GAS URL is provided
-          syncToGoogleAppsScript(payload);
 
           if (user && !isRemoteLoading.current && window.firebaseService) {
+            const payloadString = JSON.stringify(payload);
+
             if (lastSyncedPayloadRef.current !== payloadString) {
               const { db, doc, setDoc } = window.firebaseService;
               setSyncStatus('Syncing...');
               setDoc(doc(db, 'users', user.uid), payload, { merge: true })
-                .then(() => {
+                .then(async () => {
                   lastSyncedPayloadRef.current = payloadString;
                   setSyncStatus('Synced');
+                  // Trigger Google Apps Script Web App AFTER Firestore successfully saves
+                  if (window.syncToGoogleAppsScript) {
+                    await window.syncToGoogleAppsScript(payload);
+                  }
                 })
                 .catch((err) => {
                   console.error("Firestore save error:", err);
                   setSyncStatus('Sync failed');
                 });
+            }
+          } else {
+            // If offline / not logged in with Firebase, still allow direct GAS sync when fields change
+            if (window.syncToGoogleAppsScript) {
+              window.syncToGoogleAppsScript(payload);
             }
           }
         }, [exchangeRate, theme, salesPeriods, googleSheetUrl, gasWebappUrl, user]);
@@ -845,26 +858,24 @@
               const rawItems = (vendor.items || []).map(item => {
                 const printQty = parseFloat(item.printQty) || 0;
                 const unitCost = parseFloat(item.unitCost) || 0;
-                const totalAmount = printQty * unitCost;
-                return { ...item, printQty, unitCost, totalAmount };
+                const totalCost = printQty * unitCost; // 總成本 = 成本單價 × 印製數量
+                return { ...item, printQty, unitCost, totalCost };
               });
 
-              const totalVendorItemsAmount = rawItems.reduce((sum, item) => sum + item.totalAmount, 0);
+              const totalVendorItemsAmount = rawItems.reduce((sum, item) => sum + item.totalCost, 0);
               
               periodTotalCost += totalVendorItemsAmount + vendorShipping;
 
               const calculatedItems = rawItems.map(item => {
                 const printQty = item.printQty;
-                const totalAmount = item.totalAmount;
+                const totalCost = item.totalCost;
 
                 let itemShipping = 0;
                 if (totalVendorItemsAmount > 0) {
-                  itemShipping = vendorShipping * (totalAmount / totalVendorItemsAmount);
+                  itemShipping = vendorShipping * (totalCost / totalVendorItemsAmount);
                 } else if (vendor.items.length > 0) {
                   itemShipping = vendorShipping / vendor.items.length;
                 }
-
-                const totalCost = totalAmount + itemShipping;
 
                 const twdPrice = parseFloat(item.twdPrice) || 0;
                 const taiwanSalesQty = parseFloat(item.taiwanSalesQty) || 0;
@@ -876,21 +887,19 @@
                 const overseasRevenue = usdToTwd * overseasSalesQty;
 
                 const totalSalesQty = taiwanSalesQty + overseasSalesQty;
-                const totalSalesAmount = taiwanRevenue + overseasRevenue;
-                const profitAndLoss = totalSalesAmount - totalAmount;
+                const totalRevenue = taiwanRevenue + overseasRevenue; // 總收入 = 台灣銷售額 + 海外銷售額
+                const profitAndLoss = totalRevenue - totalCost; // 損益 = 總收入 - 總成本
 
-                periodTotalSales += totalSalesAmount;
+                periodTotalSales += totalRevenue;
 
                 return {
                   ...item,
                   shippingCost: itemShipping,
-                  totalAmount,
-                  totalCost,
                   taiwanRevenue,
                   usdToTwd,
                   overseasRevenue,
                   totalSalesQty,
-                  totalSalesAmount,
+                  totalRevenue,
                   profitAndLoss
                 };
               });
@@ -908,27 +917,25 @@
               const rawPkgItems = itemsList.map(item => {
                 const qty = parseFloat(item.qty) || 0;
                 const unitCost = parseFloat(item.unitCost) || 0;
-                const totalAmount = qty * unitCost;
-                return { ...item, qty, unitCost, totalAmount };
+                const totalCost = qty * unitCost;
+                return { ...item, qty, unitCost, totalCost };
               });
 
-              const totalPkgItemsAmount = rawPkgItems.reduce((sum, item) => sum + item.totalAmount, 0);
+              const totalPkgItemsAmount = rawPkgItems.reduce((sum, item) => sum + item.totalCost, 0);
               periodTotalCost += totalPkgItemsAmount + vendorShipping;
 
               const calculatedPkgItems = rawPkgItems.map(item => {
                 const qty = item.qty;
-                const totalAmount = item.totalAmount;
+                const totalCost = item.totalCost;
                 let itemShipping = 0;
                 if (totalPkgItemsAmount > 0) {
-                  itemShipping = vendorShipping * (totalAmount / totalPkgItemsAmount);
+                  itemShipping = vendorShipping * (totalCost / totalPkgItemsAmount);
                 } else if (itemsList.length > 0) {
                   itemShipping = vendorShipping / itemsList.length;
                 }
-                const totalCost = totalAmount + itemShipping;
                 return {
                   ...item,
                   shippingCost: itemShipping,
-                  totalAmount,
                   totalCost
                 };
               });
@@ -1599,16 +1606,16 @@
                                     {/* 2. 總收入 */}
                                     <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">總收入：</span>
-                                      <span className="font-bold text-[14.7px]" style={{ color: theme.salesTextColor }}>{formatCurrency(item.totalSalesAmount)}</span>
+                                      <span className="font-bold text-[14.7px]" style={{ color: theme.salesTextColor }}>{formatCurrency(item.totalRevenue)}</span>
                                     </div>
 
                                     {/* 3. 總成本 */}
                                     <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">總成本：</span>
-                                      <span className="font-bold text-[14.7px]" style={{ color: theme.inputTextColor }}>{formatCurrency(item.totalAmount)}</span>
+                                      <span className="font-bold text-[14.7px]" style={{ color: theme.inputTextColor }}>{formatCurrency(item.totalCost)}</span>
                                     </div>
 
-                                    {/* 4. 商品狀態 / 損益 */}
+                                    {/* 4. 損益金額 (僅顯示金額與顏色) */}
                                     <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">損益：</span>
                                       <span className="font-bold text-[14.7px]">
