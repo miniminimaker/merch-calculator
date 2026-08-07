@@ -22,7 +22,7 @@
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
       import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
-      import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
+      import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
       const firebaseConfig = typeof __firebase_config !== 'undefined' 
         ? JSON.parse(__firebase_config) 
@@ -41,7 +41,6 @@
       const googleProvider = new GoogleAuthProvider();
 
       // Global sync function for Google Apps Script Web App
-      // Satisfies requirements: fetch response handling, error console.error, success console.log
       window.syncToGoogleAppsScript = async (payload) => {
         const currentGasUrl = localStorage.getItem('moc_gasWebappUrl') || '';
         if (!currentGasUrl || !currentGasUrl.trim()) return;
@@ -49,7 +48,7 @@
           const response = await fetch(currentGasUrl.trim(), {
             method: 'POST',
             headers: {
-              'Content-Type': 'text/plain;charset=utf-8' // Avoids CORS preflight issue with GAS redirects
+              'Content-Type': 'text/plain;charset=utf-8'
             },
             body: JSON.stringify(payload)
           });
@@ -72,8 +71,8 @@
         signOut,
         onAuthStateChanged,
         doc,
-        getDoc,
-        setDoc
+        setDoc,
+        onSnapshot
       };
 
       window.dispatchEvent(new Event('firebase-ready'));
@@ -193,11 +192,7 @@
           packagingBoxBgColor: '#F8FAFC'     
         };
 
-        const [exchangeRate, setExchangeRate] = useState(() => {
-          const saved = localStorage.getItem('moc_exchangeRate');
-          return saved !== null ? saved : '31.5';
-        });
-
+        const [exchangeRate, setExchangeRate] = useState('31.5');
         const [showSettings, setShowSettings] = useState(false);
         const [showDataIntegration, setShowDataIntegration] = useState(false);
         const [showGoogleSheets, setShowGoogleSheets] = useState(false);
@@ -214,139 +209,58 @@
           return new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         });
         
-        const [theme, setTheme] = useState(() => {
-          const saved = localStorage.getItem('moc_theme');
-          return saved ? JSON.parse(saved) : defaultTheme;
-        });
-
-        const [salesPeriods, setSalesPeriods] = useState(() => {
-          const saved = localStorage.getItem('moc_salesPeriods');
-          if (saved) {
-            try {
-              return JSON.parse(saved);
-            } catch (e) {
-              console.error(e);
-            }
+        const [theme, setTheme] = useState(defaultTheme);
+        const [salesPeriods, setSalesPeriods] = useState([
+          {
+            id: 1,
+            isLocked: false,
+            preorderTime: '',
+            productionTime: '',
+            vendors: [
+              {
+                id: 101,
+                vendorName: '',
+                shippingCost: '',
+                items: [
+                  {
+                    id: 1001,
+                    itemTitle: '',
+                    productName: '',
+                    specs: '',
+                    style: '',
+                    notes: '',
+                    printQty: '',
+                    unitCost: '',
+                    twdPrice: '',
+                    taiwanSalesQty: '',
+                    usdPrice: '',
+                    overseasSalesQty: ''
+                  }
+                ]
+              }
+            ],
+            packagings: []
           }
-          return [
-            {
-              id: 1,
-              isLocked: false,
-              preorderTime: '',
-              productionTime: '',
-              vendors: [
-                {
-                  id: 101,
-                  vendorName: '',
-                  shippingCost: '',
-                  items: [
-                    {
-                      id: 1001,
-                      itemTitle: '',
-                      productName: '',
-                      specs: '',
-                      style: '',
-                      notes: '',
-                      printQty: '',
-                      unitCost: '',
-                      twdPrice: '',
-                      taiwanSalesQty: '',
-                      usdPrice: '',
-                      overseasSalesQty: ''
-                    }
-                  ]
-                }
-              ],
-              packagings: []
-            }
-          ];
-        });
+        ]);
 
         const [user, setUser] = useState(null);
         const [syncStatus, setSyncStatus] = useState('Offline');
         const isRemoteLoading = useRef(false);
-        const lastSyncedPayloadRef = useRef(null);
-        const lastUpdatedRef = useRef(new Date().toISOString());
 
+        // 1. Auth State Management & Real-time Cloud Sync Listener
         useEffect(() => {
           const checkFirebaseReady = () => {
             if (window.firebaseService) {
-              const { auth, onAuthStateChanged, db, doc, getDoc, setDoc } = window.firebaseService;
+              const { auth, onAuthStateChanged, db, doc, onSnapshot } = window.firebaseService;
               
-              onAuthStateChanged(auth, async (currentUser) => {
+              const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
                 setUser(currentUser);
-                if (currentUser) {
-                  setSyncStatus('Syncing...');
-                  try {
-                    isRemoteLoading.current = true;
-                    const userDocRef = doc(db, 'users', currentUser.uid);
-                    const docSnap = await getDoc(userDocRef);
-                    
-                    const localLastUpdated = localStorage.getItem('moc_lastUpdated') || new Date(0).toISOString();
-
-                    if (docSnap.exists()) {
-                      const remoteData = docSnap.data();
-                      const remoteLastUpdated = remoteData.lastUpdated || new Date(0).toISOString();
-
-                      if (new Date(remoteLastUpdated) > new Date(localLastUpdated)) {
-                        if (remoteData.salesPeriods) {
-                          setSalesPeriods(remoteData.salesPeriods);
-                          localStorage.setItem('moc_salesPeriods', JSON.stringify(remoteData.salesPeriods));
-                        }
-                        if (remoteData.exchangeRate !== undefined) {
-                          setExchangeRate(remoteData.exchangeRate);
-                          localStorage.setItem('moc_exchangeRate', remoteData.exchangeRate);
-                        }
-                        if (remoteData.theme) {
-                          setTheme(remoteData.theme);
-                          localStorage.setItem('moc_theme', JSON.stringify(remoteData.theme));
-                        }
-                        if (remoteData.googleSheetUrl !== undefined) {
-                          setGoogleSheetUrl(remoteData.googleSheetUrl);
-                          localStorage.setItem('moc_googleSheetUrl', remoteData.googleSheetUrl);
-                        }
-                        if (remoteData.gasWebappUrl !== undefined) {
-                          setGasWebappUrl(remoteData.gasWebappUrl);
-                          localStorage.setItem('moc_gasWebappUrl', remoteData.gasWebappUrl);
-                        }
-                        lastUpdatedRef.current = remoteLastUpdated;
-                        localStorage.setItem('moc_lastUpdated', remoteLastUpdated);
-                      } else {
-                        const currentPayload = {
-                          salesPeriods,
-                          exchangeRate,
-                          theme,
-                          googleSheetUrl,
-                          gasWebappUrl,
-                          lastUpdated: localLastUpdated
-                        };
-                        await setDoc(userDocRef, currentPayload);
-                        lastUpdatedRef.current = localLastUpdated;
-                      }
-                      setSyncStatus('Synced');
-                    } else {
-                      const currentPayload = {
-                        salesPeriods,
-                        exchangeRate,
-                        theme,
-                        googleSheetUrl,
-                        gasWebappUrl,
-                        lastUpdated: lastUpdatedRef.current
-                      };
-                      await setDoc(userDocRef, currentPayload);
-                      localStorage.setItem('moc_lastUpdated', lastUpdatedRef.current);
-                      setSyncStatus('Synced');
-                    }
-                  } catch (err) {
-                    console.error("Firestore sync error:", err);
-                    setSyncStatus('Sync failed');
-                  } finally {
-                    isRemoteLoading.current = false;
-                  }
-                } else {
-                  setSyncStatus(navigator.onLine ? 'Synced' : 'Offline');
+                if (!currentUser) {
+                  setSyncStatus('Offline');
                 }
               });
+
+              return () => unsubscribeAuth();
             }
           };
 
@@ -359,20 +273,73 @@
         }, []);
 
         useEffect(() => {
-          const handleOnline = () => {
-            if (user) setSyncStatus('Synced');
-            else setSyncStatus('Offline');
-          };
-          const handleOffline = () => {
-            setSyncStatus('Offline');
-          };
-          window.addEventListener('online', handleOnline);
-          window.addEventListener('offline', handleOffline);
-          return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-          };
+          if (!user || !window.firebaseService) return;
+          const { db, doc, onSnapshot } = window.firebaseService;
+          const userDocRef = doc(db, 'users', user.uid);
+
+          setSyncStatus('Syncing...');
+          const unsubscribeSnapshot = onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+              isRemoteLoading.current = true;
+              const remoteData = docSnap.data();
+              if (remoteData.salesPeriods) setSalesPeriods(remoteData.salesPeriods);
+              if (remoteData.exchangeRate !== undefined) setExchangeRate(remoteData.exchangeRate);
+              if (remoteData.theme) setTheme(remoteData.theme);
+              if (remoteData.googleSheetUrl !== undefined) setGoogleSheetUrl(remoteData.googleSheetUrl);
+              if (remoteData.gasWebappUrl !== undefined) setGasWebappUrl(remoteData.gasWebappUrl);
+              
+              setSyncStatus('Synced');
+              setTimeout(() => {
+                isRemoteLoading.current = false;
+              }, 500);
+            } else {
+              setSyncStatus('Synced');
+            }
+          }, (err) => {
+            console.error("Firestore sync error:", err);
+            setSyncStatus('Sync failed');
+          });
+
+          return () => unsubscribeSnapshot();
         }, [user]);
+
+        // Save gasWebappUrl and googleSheetUrl locally
+        useEffect(() => {
+          localStorage.setItem('moc_googleSheetUrl', googleSheetUrl);
+          localStorage.setItem('moc_gasWebappUrl', gasWebappUrl);
+        }, [googleSheetUrl, gasWebappUrl]);
+
+        // 2. Real-time Cloud Auto-Save on Changes
+        useEffect(() => {
+          if (isRemoteLoading.current || !user || !window.firebaseService) return;
+
+          const { db, doc, setDoc } = window.firebaseService;
+          const nowIso = new Date().toISOString();
+          const timeStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setLastSavedTime(timeStr);
+
+          const payload = {
+            salesPeriods,
+            exchangeRate,
+            theme,
+            googleSheetUrl,
+            gasWebappUrl,
+            lastUpdated: nowIso
+          };
+
+          setSyncStatus('Syncing...');
+          setDoc(doc(db, 'users', user.uid), payload, { merge: true })
+            .then(async () => {
+              setSyncStatus('Synced');
+              if (window.syncToGoogleAppsScript) {
+                await window.syncToGoogleAppsScript(payload);
+              }
+            })
+            .catch((err) => {
+              console.error("Firestore save error:", err);
+              setSyncStatus('Sync failed');
+            });
+        }, [salesPeriods, exchangeRate, theme, googleSheetUrl, gasWebappUrl]);
 
         const handleGoogleLogin = async () => {
           if (!window.firebaseService) return;
@@ -397,57 +364,6 @@
             console.error("Logout failed:", err);
           }
         };
-
-        useEffect(() => {
-          localStorage.setItem('moc_exchangeRate', exchangeRate);
-          localStorage.setItem('moc_theme', JSON.stringify(theme));
-          localStorage.setItem('moc_salesPeriods', JSON.stringify(salesPeriods));
-          localStorage.setItem('moc_googleSheetUrl', googleSheetUrl);
-          localStorage.setItem('moc_gasWebappUrl', gasWebappUrl);
-          
-          const nowIso = new Date().toISOString();
-          lastUpdatedRef.current = nowIso;
-          localStorage.setItem('moc_lastUpdated', nowIso);
-
-          const timeStr = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          setLastSavedTime(timeStr);
-
-          const payload = {
-            salesPeriods,
-            exchangeRate,
-            theme,
-            googleSheetUrl,
-            gasWebappUrl,
-            lastUpdated: nowIso
-          };
-
-          if (user && !isRemoteLoading.current && window.firebaseService) {
-            const payloadString = JSON.stringify(payload);
-
-            if (lastSyncedPayloadRef.current !== payloadString) {
-              const { db, doc, setDoc } = window.firebaseService;
-              setSyncStatus('Syncing...');
-              setDoc(doc(db, 'users', user.uid), payload, { merge: true })
-                .then(async () => {
-                  lastSyncedPayloadRef.current = payloadString;
-                  setSyncStatus('Synced');
-                  // Trigger Google Apps Script Web App AFTER Firestore successfully saves
-                  if (window.syncToGoogleAppsScript) {
-                    await window.syncToGoogleAppsScript(payload);
-                  }
-                })
-                .catch((err) => {
-                  console.error("Firestore save error:", err);
-                  setSyncStatus('Sync failed');
-                });
-            }
-          } else {
-            // If offline / not logged in with Firebase, still allow direct GAS sync when fields change
-            if (window.syncToGoogleAppsScript) {
-              window.syncToGoogleAppsScript(payload);
-            }
-          }
-        }, [exchangeRate, theme, salesPeriods, googleSheetUrl, gasWebappUrl, user]);
 
         const handleAddSalesPeriod = () => {
           const newSp = {
@@ -858,7 +774,7 @@
               const rawItems = (vendor.items || []).map(item => {
                 const printQty = parseFloat(item.printQty) || 0;
                 const unitCost = parseFloat(item.unitCost) || 0;
-                const totalCost = printQty * unitCost; // 總成本 = 成本單價 × 印製數量
+                const totalCost = printQty * unitCost;
                 return { ...item, printQty, unitCost, totalCost };
               });
 
@@ -887,8 +803,8 @@
                 const overseasRevenue = usdToTwd * overseasSalesQty;
 
                 const totalSalesQty = taiwanSalesQty + overseasSalesQty;
-                const totalRevenue = taiwanRevenue + overseasRevenue; // 總收入 = 台灣銷售額 + 海外銷售額
-                const profitAndLoss = totalRevenue - totalCost; // 損益 = 總收入 - 總成本
+                const totalRevenue = taiwanRevenue + overseasRevenue;
+                const profitAndLoss = totalRevenue - totalCost;
 
                 periodTotalSales += totalRevenue;
 
@@ -974,7 +890,7 @@
                   </div>
                   <div className="font-sans">
                     <h1 className="text-[16.7px] sm:text-[18.7px] font-bold tracking-tight font-sans" style={{ color: theme.headerTextColor }}>週邊成本試算表</h1>
-                    <p className="text-[12.7px] text-white/80 font-normal">多場次與海外通販財務試算工具</p>
+                    <p className="text-[12.7px] text-white/80 font-normal">多場次與海外通販財務試算工具 (雲端即時同步)</p>
                   </div>
                 </div>
 
@@ -1090,9 +1006,6 @@
                         className="flex-grow px-3 py-2 rounded-xl border border-slate-300 outline-none text-slate-800 text-[12.7px] bg-slate-50 focus:bg-white"
                       />
                     </div>
-                    <p className="text-[11.7px] text-slate-500">
-                      💡 <strong>提示：</strong>當資料變更並成功寫入 Firestore 後，系統會自動 POST JSON 資料至上方填寫的 Google Apps Script Web App URL 以同步更新 Google 試算表。
-                    </p>
                   </div>
 
                   {googleSheetUrl ? (
@@ -1107,7 +1020,6 @@
                     <div className="w-full h-48 bg-slate-100 rounded-xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center gap-2 text-slate-500 p-4 text-center">
                       <Icons.FileSpreadsheet />
                       <p className="font-semibold">尚未設定 Google 試算表連結</p>
-                      <p className="text-[11.7px]">請將您的線上 Google 試算表發佈連結貼在上方，即可在此即時載入表格內容！</p>
                     </div>
                   )}
                 </div>
@@ -1162,7 +1074,7 @@
               <div className="px-4 sm:px-5 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center gap-3 flex-wrap font-sans text-[11px]">
                 <div className="flex items-center gap-2.5 flex-wrap">
                   <div className="flex items-center gap-1.5 font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 shadow-sm text-[11px]">
-                    <span className="text-[11px]">✔ 已自動儲存</span>
+                    <span className="text-[11px]">✔ 雲端自動同步</span>
                     <span className="text-slate-500 font-normal text-[11px]">| 最後儲存時間: {lastSavedTime}</span>
                   </div>
 
@@ -1182,7 +1094,7 @@
                         onClick={handleGoogleLogin}
                         className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg font-bold transition-all text-[11px] flex items-center gap-1 shadow-sm"
                       >
-                        <span className="text-[11px]">Google 雲端同步</span>
+                        <span className="text-[11px]">Google 帳號登入同步</span>
                       </button>
                     )}
                     <span className="text-slate-300 text-[11px]">|</span>
@@ -1218,10 +1130,8 @@
                         className="p-4 sm:p-5 flex flex-col gap-3.5 font-sans"
                         style={{ backgroundColor: theme.headerBgColor, color: theme.headerTextColor }}
                       >
-                        {/* Aligned Single-Row Header Controls */}
                         <div className="flex flex-wrap items-center justify-between gap-3 font-sans">
                           
-                          {/* Left: Preorder & Production Time inputs */}
                           <div className="flex flex-wrap items-center gap-3 font-sans">
                             <div className="flex items-center gap-2 font-sans bg-black/10 px-3 py-1.5 rounded-xl border border-white/10 shadow-sm">
                               <span className="text-[12.7px] font-bold flex items-center gap-1 whitespace-nowrap opacity-90 font-sans" style={{ color: theme.headerTextColor }}><Icons.Calendar /> 預購時間：</span>
@@ -1248,7 +1158,6 @@
                             </div>
                           </div>
 
-                          {/* Right: Export, Lock, Delete Controls */}
                           <div className="flex items-center gap-2.5 font-sans flex-wrap">
                             <label className="flex items-center gap-2 bg-black/15 px-3.5 py-1.5 rounded-xl cursor-pointer border border-white/10 shadow-sm">
                               <input 
@@ -1283,7 +1192,6 @@
 
                         </div>
 
-                        {/* Sub Toolbar for adding vendor/packaging */}
                         <div className="flex items-center gap-2 pt-2 border-t border-white/15 font-sans">
                           <button 
                             onClick={() => handleAddVendor(sp.id)}
@@ -1310,7 +1218,6 @@
                       {/* Vendors and Packagings Container */}
                       <div className="p-3 sm:p-5 flex flex-col gap-5 bg-slate-50/50 font-sans text-[12.7px]">
                         
-                        {/* 1. Manufacturing Vendors Section */}
                         {sp.vendors.map((vendor) => (
                           <div 
                             key={vendor.id} 
@@ -1318,7 +1225,6 @@
                             style={{ backgroundColor: theme.vendorBoxBgColor }}
                           >
                             
-                            {/* 【廠商】 Header */}
                             <div 
                               className="px-4 py-3 m-3 mb-0 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 font-sans shadow-sm border border-slate-200/60"
                               style={{ backgroundColor: theme.vendorHeaderBgColor }}
@@ -1371,12 +1277,10 @@
                               </div>
                             </div>
 
-                            {/* Merchandise Items Grid Layout */}
                             <div className="p-3 sm:p-4 flex flex-col gap-3.5 font-sans">
                               {vendor.items.map((item) => (
                                 <div key={item.id} className="bg-white rounded-xl shadow-sm p-4 flex flex-col gap-3 font-sans border border-slate-200 relative">
                                   
-                                  {/* Item Header & Delete */}
                                   <div className="flex justify-between items-center gap-3 font-sans border-b border-slate-100 pb-2.5">
                                     <div className="flex items-center gap-2 flex-grow font-sans">
                                       <span className="text-[12.7px] font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">品項</span>
@@ -1400,7 +1304,6 @@
                                     </button>
                                   </div>
 
-                                  {/* Compact Grid for Attributes */}
                                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 font-sans">
                                     <div>
                                       <label className="block font-semibold mb-1 text-slate-500 text-[11.7px]">品名</label>
@@ -1452,7 +1355,6 @@
                                     </div>
                                   </div>
 
-                                  {/* Print Qty & Unit Cost Row */}
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 font-sans">
                                     <div className="bg-blue-50/40 p-2.5 rounded-xl border border-blue-100">
                                       <label className="block font-bold mb-1 text-blue-700 text-[11.7px]">印製數量</label>
@@ -1482,10 +1384,8 @@
                                     </div>
                                   </div>
 
-                                  {/* Sales Sub-Sections Grid */}
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-sans pt-1">
                                     
-                                    {/* 🇹🇼 台灣販售 */}
                                     <div 
                                       className="p-3 rounded-xl flex flex-col gap-2.5 font-sans border border-sky-100 shadow-sm"
                                       style={{ backgroundColor: theme.taiwanBoxBgColor }}
@@ -1530,7 +1430,6 @@
                                       </div>
                                     </div>
 
-                                    {/* 🌍 海外販售 */}
                                     <div 
                                       className="p-3 rounded-xl flex flex-col gap-2.5 font-sans border border-amber-100 shadow-sm"
                                       style={{ backgroundColor: theme.overseasBoxBgColor }}
@@ -1594,28 +1493,22 @@
 
                                   </div>
 
-                                  {/* Unified 4-Card Summary Bar for Item */}
                                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 pt-2 border-t border-slate-100 text-[12.7px] font-sans">
-                                    
-                                    {/* 1. 總銷售數量 */}
                                     <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">總銷售數量：</span>
                                       <span className="font-bold text-[14.7px]" style={{ color: theme.qtyTextColor }}>{item.totalSalesQty}</span>
                                     </div>
 
-                                    {/* 2. 總收入 */}
                                     <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">總收入：</span>
                                       <span className="font-bold text-[14.7px]" style={{ color: theme.salesTextColor }}>{formatCurrency(item.totalRevenue)}</span>
                                     </div>
 
-                                    {/* 3. 總成本 */}
                                     <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">總成本：</span>
                                       <span className="font-bold text-[14.7px]" style={{ color: theme.inputTextColor }}>{formatCurrency(item.totalCost)}</span>
                                     </div>
 
-                                    {/* 4. 損益金額 (僅顯示金額與顏色) */}
                                     <div className="flex items-center justify-between bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 shadow-sm">
                                       <span className="font-semibold text-slate-600">損益：</span>
                                       <span className="font-bold text-[14.7px]">
@@ -1646,7 +1539,6 @@
                             style={{ backgroundColor: theme.packagingBoxBgColor }}
                           >
                             
-                            {/* 【包材】 Header */}
                             <div 
                               className="px-4 py-3 m-3 mb-0 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 font-sans shadow-sm border border-slate-200/60"
                               style={{ backgroundColor: theme.packagingHeaderBgColor }}
