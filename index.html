@@ -38,8 +38,8 @@
       const googleProvider = new GoogleAuthProvider();
 
       // 同步寫入 Google Apps Script
-      window.syncToGoogleAppsScript = async (payload) => {
-        const currentGasUrl = localStorage.getItem('moc_gasWebappUrl') || '';
+      window.syncToGoogleAppsScript = async (payload, customGasUrl) => {
+        const currentGasUrl = customGasUrl || localStorage.getItem('moc_gasWebappUrl') || '';
         if (!currentGasUrl || !currentGasUrl.trim()) return;
         try {
           const response = await fetch(currentGasUrl.trim(), {
@@ -58,12 +58,11 @@
       };
 
       // 從 Google Apps Script 讀取雲端試算表裡的存檔清單
-      window.fetchGoogleSheetVersions = async () => {
-        const currentGasUrl = localStorage.getItem('moc_gasWebappUrl') || '';
+      window.fetchGoogleSheetVersions = async (customGasUrl) => {
+        const currentGasUrl = customGasUrl || localStorage.getItem('moc_gasWebappUrl') || '';
         if (!currentGasUrl || !currentGasUrl.trim()) throw new Error("請先填寫 Google Apps Script 網址");
         
         try {
-          // 利用 GET 請求向 GAS 索取資料庫清單
           const response = await fetch(currentGasUrl.trim());
           const result = await response.json();
           if (result.status === "success") {
@@ -152,6 +151,13 @@
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
           </svg>
+        ),
+        Save: () => (
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            <polyline points="7 3 7 8 15 8"></polyline>
+          </svg>
         )
       };
 
@@ -169,10 +175,8 @@
 
         const [exchangeRate, setExchangeRate] = useState('31.5');
         const [showGoogleSheets, setShowGoogleSheets] = useState(false);
-        const [googleSheetUrl, setGoogleSheetUrl] = useState(() => localStorage.getItem('moc_googleSheetUrl') || '');
-        const [gasWebappUrl, setGasWebappUrl] = useState(() => localStorage.getItem('moc_gasWebappUrl') || '');
+        const [gasWebappUrl, setGasWebappUrl] = useState('');
 
-        const [selectedExportIds, setSelectedExportIds] = useState({});
         const [exportNotice, setExportNotice] = useState('');
         const [lastSavedTime, setLastSavedTime] = useState(() => new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         
@@ -190,48 +194,97 @@
         const [syncStatus, setSyncStatus] = useState('Offline');
         const isRemoteLoading = useRef(false);
 
+        // 監聽 Firebase 登入狀態，並自動從雲端載入該使用者的 GAS 網址與上次的工作狀態
         useEffect(() => {
-          localStorage.setItem('moc_googleSheetUrl', googleSheetUrl);
-          localStorage.setItem('moc_gasWebappUrl', gasWebappUrl);
-          setLastSavedTime(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-
-          if (isRemoteLoading.current) return;
-
-          const payload = {
-            docId: currentDocId,
-            title: currentDocTitle,
-            salesPeriods,
-            exchangeRate,
-            theme,
-            lastUpdated: new Date().toISOString()
+          const checkFirebaseReady = () => {
+            if (window.firebaseService) {
+              const { auth, onAuthStateChanged, db, doc, getDoc } = window.firebaseService;
+              onAuthStateChanged(auth, async (currentUser) => {
+                setUser(currentUser);
+                if (currentUser) {
+                  setSyncStatus('Syncing...');
+                  try {
+                    const userDocRef = doc(db, 'users', currentUser.uid);
+                    const docSnap = await getDoc(userDocRef);
+                    if (docSnap.exists()) {
+                      const cloudData = docSnap.data();
+                      if (cloudData.gasWebappUrl) {
+                        setGasWebappUrl(cloudData.gasWebappUrl);
+                        localStorage.setItem('moc_gasWebappUrl', cloudData.gasWebappUrl);
+                      }
+                      if (cloudData.salesPeriods) setSalesPeriods(cloudData.salesPeriods);
+                      if (cloudData.exchangeRate) setExchangeRate(cloudData.exchangeRate);
+                      if (cloudData.currentDocId) setCurrentDocId(cloudData.currentDocId);
+                      if (cloudData.currentDocTitle) setCurrentDocTitle(cloudData.currentDocTitle);
+                    }
+                    setSyncStatus('Synced');
+                  } catch (err) {
+                    console.error("Cloud config load failed", err);
+                    setSyncStatus('Sync failed');
+                  }
+                } else {
+                  setSyncStatus('Offline');
+                }
+              });
+            }
           };
+          if (window.firebaseService) checkFirebaseReady();
+          else window.addEventListener('firebase-ready', checkFirebaseReady);
+          return () => window.removeEventListener('firebase-ready', checkFirebaseReady);
+        }, []);
 
-          // 自動同步回 GAS 試算表
-          if (window.syncToGoogleAppsScript) {
+        const handleGoogleLogin = async () => {
+          if (!window.firebaseService) return;
+          const { auth, googleProvider, signInWithPopup } = window.firebaseService;
+          try {
             setSyncStatus('Syncing...');
-            window.syncToGoogleAppsScript(payload).then(() => {
-              setSyncStatus('Synced');
-            }).catch(() => {
-              setSyncStatus('Sync failed');
-            });
+            await signInWithPopup(auth, googleProvider);
+          } catch (err) {
+            console.error("Login failed:", err);
+            setSyncStatus('Sync failed');
           }
-        }, [salesPeriods, exchangeRate, theme, currentDocId, currentDocTitle, gasWebappUrl]);
+        };
 
-        // 載入 Google 試算表裡的雲端版本清單
+        const handleLogout = async () => {
+          if (!window.firebaseService) return;
+          const { auth, signOut } = window.firebaseService;
+          try {
+            await signOut(auth);
+            setUser(null);
+            setSyncStatus('Offline');
+          } catch (err) { console.error(err); }
+        };
+
+        // 當 GAS 網址變更時，同時寫入本機與 Firebase 雲端，確保換電腦也不用重新輸入
+        const handleGasUrlChange = async (newUrl) => {
+          setGasWebappUrl(newUrl);
+          localStorage.setItem('moc_gasWebappUrl', newUrl);
+          
+          if (user && window.firebaseService) {
+            const { db, doc, setDoc } = window.firebaseService;
+            try {
+              await setDoc(doc(db, 'users', user.uid), { gasWebappUrl: newUrl }, { merge: true });
+            } catch (err) {
+              console.error("Failed to save GAS URL to cloud", err);
+            }
+          }
+        };
+
+        // 讀取 Google 試算表裡的雲端版本清單
         const handleLoadGoogleSheetVersions = async () => {
           if (!gasWebappUrl) {
-            alert("請先在「雲端試算表」面板中填入 Google Apps Script Web App 網址！");
+            alert("請先填寫 Google Apps Script 網址！");
             setShowGoogleSheets(true);
             return;
           }
           try {
             setIsLoadingSheet(true);
             setSyncStatus('Syncing...');
-            const versions = await window.fetchGoogleSheetVersions();
+            const versions = await window.fetchGoogleSheetVersions(gasWebappUrl);
             setSheetVersions(versions);
             setSyncStatus('Synced');
             if (versions.length === 0) {
-              alert("試算表中尚無任何存檔清單。");
+              alert("Google 試算表中尚無任何存檔清單。");
             }
           } catch (err) {
             alert("讀取失敗：" + err.message);
@@ -243,6 +296,10 @@
 
         // 選擇讀取 Google 試算表中的某一筆存檔
         const handleSelectSheetVersion = (ver) => {
+          if (!user) {
+            alert("請先登入 Google 帳號才能讀取雲端試算表！");
+            return;
+          }
           if (!confirm(`確定要從 Google 試算表讀取版本「${ver.title}」嗎？目前的未儲存資料將被覆蓋。`)) return;
           
           isRemoteLoading.current = true;
@@ -253,25 +310,68 @@
             if (ver.payload.exchangeRate) setExchangeRate(ver.payload.exchangeRate);
             if (ver.payload.theme) setTheme(ver.payload.theme);
           }
-          setTimeout(() => {
-            isRemoteLoading.current = false;
-          }, 300);
+          setTimeout(() => { isRemoteLoading.current = false; }, 300);
 
           setExportNotice(`已成功從 Google 試算表讀取：${ver.title}`);
           setTimeout(() => setExportNotice(''), 4000);
         };
 
+        // 手動覆蓋儲存到指定的 Google 試算表版本
+        const handleManualSyncToCloud = async () => {
+          if (!user) {
+            alert("請先登入 Google 帳號才能覆蓋儲存至雲端試算表！");
+            return;
+          }
+          if (!gasWebappUrl) {
+            alert("請先填寫 Google Apps Script 網址！");
+            setShowGoogleSheets(true);
+            return;
+          }
+
+          const payload = {
+            docId: currentDocId,
+            title: currentDocTitle,
+            salesPeriods,
+            exchangeRate,
+            theme,
+            lastUpdated: new Date().toISOString()
+          };
+
+          try {
+            setSyncStatus('Syncing...');
+            await window.syncToGoogleAppsScript(payload, gasWebappUrl);
+            
+            // 同時在 Firebase 記錄目前編輯的 docId 與 title
+            const { db, doc, setDoc } = window.firebaseService;
+            await setDoc(doc(db, 'users', user.uid), { currentDocId, currentDocTitle, salesPeriods, exchangeRate }, { merge: true });
+
+            setSyncStatus('Synced');
+            setLastSavedTime(new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+            setExportNotice(`已成功覆蓋儲存至 Google 試算表中的「${currentDocTitle}」！`);
+            setTimeout(() => setExportNotice(''), 4000);
+            handleLoadGoogleSheetVersions();
+          } catch (err) {
+            alert("覆蓋儲存失敗：" + err.message);
+            setSyncStatus('Sync failed');
+          }
+        };
+
         // 建立新試算表版本
         const handleCreateNewSheetVersion = () => {
+          if (!user) {
+            alert("請先登入 Google 帳號！");
+            return;
+          }
           const newTitle = prompt("請輸入新試算表/場次標題名稱：", `成本試算表_${new Date().toLocaleDateString()}`);
           if (!newTitle) return;
 
-          setCurrentDocId('sheet_' + Date.now());
+          const newId = 'sheet_' + Date.now();
+          setCurrentDocId(newId);
           setCurrentDocTitle(newTitle);
           setSalesPeriods([
             { id: Date.now(), isLocked: false, preorderTime: newTitle, productionTime: '', vendors: [], packagings: [] }
           ]);
-          setExportNotice(`已建立新表單：${newTitle}，修改後將自動存入試算表`);
+          setExportNotice(`已建立新表單：${newTitle}，點擊「覆蓋儲存到此雲端試算表」即可寫入 Google 試算表`);
           setTimeout(() => setExportNotice(''), 4000);
         };
 
@@ -358,8 +458,6 @@
           }));
         };
 
-        const handleToggleExportSelection = (spId) => { setSelectedExportIds(prev => ({ ...prev, [spId]: !prev[spId] })); };
-
         const calculatedData = useMemo(() => {
           const globalRate = parseFloat(exchangeRate) || 0;
           return salesPeriods.map(sp => {
@@ -436,7 +534,9 @@
                   </div>
                   <div className="font-sans">
                     <h1 className="text-[16.7px] sm:text-[18.7px] font-bold tracking-tight font-sans" style={{ color: theme.headerTextColor }}>週邊成本試算表</h1>
-                    <p className="text-[12.7px] text-white/80 font-normal">目前編輯中：<span className="font-bold underline">{currentDocTitle}</span></p>
+                    <p className="text-[12.7px] text-white/80 font-normal">
+                      目前編輯目標：<span className="font-bold underline">{currentDocTitle}</span>
+                    </p>
                   </div>
                 </div>
 
@@ -445,7 +545,14 @@
                     onClick={handleLoadGoogleSheetVersions}
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12.7px] font-bold transition-all font-sans bg-amber-500 hover:bg-amber-600 text-white shadow-md border border-amber-400"
                   >
-                    <Icons.Cloud /> 讀取 Google 試算表資料
+                    <Icons.Cloud /> 讀取雲端試算表資料
+                  </button>
+
+                  <button 
+                    onClick={handleManualSyncToCloud}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12.7px] font-bold transition-all font-sans bg-emerald-600 hover:bg-emerald-700 text-white shadow-md border border-emerald-500"
+                  >
+                    <Icons.Save /> 覆蓋儲存到此雲端試算表
                   </button>
 
                   <button 
@@ -468,7 +575,7 @@
               {showGoogleSheets && (
                 <div className="p-4 sm:p-5 bg-slate-50 border-b border-slate-200 flex flex-col gap-4 animate-fade-in text-[12.7px] font-sans">
                   <div className="flex justify-between items-center border-b border-slate-200 pb-3 font-sans">
-                    <h3 className="font-bold text-slate-800 text-[14.7px] flex items-center gap-2 font-sans">📊 Google 試算表資料庫設定與雲端讀取</h3>
+                    <h3 className="font-bold text-slate-800 text-[14.7px] flex items-center gap-2 font-sans">📊 Google 試算表資料庫設定與版本管理</h3>
                     <button onClick={() => setShowGoogleSheets(false)} className="text-[12.7px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-xl font-semibold">關閉面板</button>
                   </div>
 
@@ -478,25 +585,25 @@
                       <input 
                         type="text" 
                         value={gasWebappUrl}
-                        onChange={(e) => setGasWebappUrl(e.target.value)}
+                        onChange={(e) => handleGasUrlChange(e.target.value)}
                         placeholder="https://script.google.com/macros/s/.../exec" 
                         className="flex-grow px-3 py-2 rounded-xl border border-slate-300 outline-none text-[12.7px] bg-slate-50 focus:bg-white"
                       />
                     </div>
                     <p className="text-[11.7px] text-slate-500">
-                      💡 <strong>提示：</strong>只要填入此網址，網頁就能向您的 Google 試算表下載所有存檔，也能隨時將修改後的資料同步回試算表與「場次總表」。
+                      💡 <strong>提示：</strong>此網址會自動儲存到您的 Google 帳號雲端中。無論您換到哪台電腦或哪個瀏覽器，只要登入帳號就會自動帶入，不需要重複輸入！
                     </p>
                   </div>
 
                   <div className="flex justify-between items-center pt-2">
-                    <span className="font-bold text-slate-700">雲端試算表裡的存檔清單：</span>
+                    <span className="font-bold text-slate-700">Google 試算表中的存檔清單（點擊即可載入）：</span>
                     <button onClick={handleCreateNewSheetVersion} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 text-[12.7px]">
-                      <Icons.Plus /> 建立全新表單
+                      <Icons.Plus /> 建立新試算表版本
                     </button>
                   </div>
 
                   {isLoadingSheet ? (
-                    <div className="p-6 text-center text-slate-500 font-semibold">正在向 Google 試算表讀取資料中...</div>
+                    <div className="p-6 text-center text-slate-500 font-semibold">正在從 Google 試算表讀取資料中...</div>
                   ) : sheetVersions.length > 0 ? (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[250px] overflow-y-auto">
                       {sheetVersions.map((ver) => {
@@ -504,16 +611,20 @@
                         return (
                           <div 
                             key={ver.id}
-                            onClick={() => handleSelectSheetVersion(ver)}
-                            className={`p-3.5 rounded-xl border cursor-pointer transition-all flex flex-col justify-between gap-2 shadow-sm ${isCurrent ? 'bg-sky-50 border-sky-400 ring-2 ring-sky-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
+                            className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between gap-2 shadow-sm ${isCurrent ? 'bg-sky-50 border-sky-400 ring-2 ring-sky-300' : 'bg-white border-slate-200 hover:bg-slate-50'}`}
                           >
                             <div className="flex justify-between items-start">
                               <span className="font-bold text-[14.7px] text-slate-800">{ver.title || '未命名'}</span>
-                              {isCurrent && <span className="bg-sky-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">目前載入中</span>}
+                              {isCurrent && <span className="bg-sky-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">目前編輯中</span>}
                             </div>
-                            <div className="text-[11px] text-slate-500 flex justify-between">
+                            <div className="text-[11px] text-slate-500 flex justify-between items-center">
                               <span>更新: {new Date(ver.lastUpdated || Date.now()).toLocaleString('zh-TW')}</span>
-                              <span className="text-blue-600 font-bold underline">點擊讀取此版本</span>
+                              <button 
+                                onClick={() => handleSelectSheetVersion(ver)}
+                                className="bg-slate-900 hover:bg-slate-800 text-white px-2.5 py-1 rounded-lg font-bold text-[11px]"
+                              >
+                                讀取此版本
+                              </button>
                             </div>
                           </div>
                         );
@@ -521,8 +632,8 @@
                     </div>
                   ) : (
                     <div className="p-6 bg-white rounded-xl border border-slate-200 text-center text-slate-500 flex flex-col items-center gap-2">
-                      <p>尚未載入或找不到雲端清單</p>
-                      <button onClick={handleLoadGoogleSheetVersions} className="bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-[12.7px]">立即從 Google 試算表讀取</button>
+                      <p>尚未讀取或找不到雲端清單</p>
+                      <button onClick={handleLoadGoogleSheetVersions} className="bg-slate-900 text-white px-4 py-2 rounded-xl font-bold text-[12.7px]">立即讀取 Google 試算表清單</button>
                     </div>
                   )}
                 </div>
@@ -531,13 +642,22 @@
               {/* Status Bar */}
               <div className="px-4 sm:px-5 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center gap-3 flex-wrap font-sans text-[11px]">
                 <div className="flex items-center gap-2.5 flex-wrap">
-                  <div className="flex items-center gap-1.5 font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 shadow-sm text-[11px]">
-                    <span>✔ 雲端試算表資料庫連線</span>
-                    <span className="text-slate-500 font-normal">| 最後儲存時間: {lastSavedTime}</span>
+                  <div className="flex items-center gap-1.5 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-sm text-[11px]">
+                    {user ? (
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="font-bold text-slate-700 truncate max-w-[140px]" title={user.email}>{user.displayName || user.email}</span>
+                        <button onClick={handleLogout} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-bold">登出</button>
+                      </div>
+                    ) : (
+                      <button onClick={handleGoogleLogin} className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg font-bold flex items-center gap-1 shadow-sm">
+                        <span>Google 帳號登入</span>
+                      </button>
+                    )}
+                    <span className="text-slate-300">|</span>
+                    <span className={`px-2 py-0.5 rounded font-bold ${syncStatus === 'Synced' ? 'bg-emerald-600 text-white' : syncStatus === 'Syncing...' ? 'bg-amber-500 text-white' : 'bg-rose-600 text-white'}`}>
+                      {syncStatus}
+                    </span>
                   </div>
-                  <span className={`px-2 py-0.5 rounded font-bold text-[11px] ${syncStatus === 'Synced' ? 'bg-emerald-600 text-white' : syncStatus === 'Syncing...' ? 'bg-amber-500 text-white' : 'bg-rose-600 text-white'}`}>
-                    {syncStatus}
-                  </span>
                 </div>
               </div>
 
@@ -754,3 +874,4 @@
     </script>
 </body>
 </html>
+```eof
