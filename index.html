@@ -22,7 +22,7 @@
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-app.js";
       import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-auth.js";
-      import { getFirestore, doc, collection, addDoc, getDocs, updateDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
+      import { getFirestore, doc, collection, addDoc, getDocs, updateDoc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.17.0/firebase-firestore.js";
 
       const firebaseConfig = typeof __firebase_config !== 'undefined' 
         ? JSON.parse(__firebase_config) 
@@ -75,7 +75,8 @@
         addDoc,
         getDocs,
         updateDoc,
-        setDoc
+        setDoc,
+        deleteDoc
       };
 
       window.dispatchEvent(new Event('firebase-ready'));
@@ -257,7 +258,7 @@
         useEffect(() => {
           const checkFirebaseReady = () => {
             if (window.firebaseService) {
-              const { auth, onAuthStateChanged, db, collection, getDocs, doc, setDoc } = window.firebaseService;
+              const { auth, onAuthStateChanged, db, collection, getDocs, doc, addDoc } = window.firebaseService;
               
               onAuthStateChanged(auth, async (currentUser) => {
                 setUser(currentUser);
@@ -275,11 +276,9 @@
                     });
 
                     if (versions.length > 0) {
-                      // 依照最後更新時間排序，預設載入最近的一筆
                       versions.sort((a, b) => new Date(b.lastUpdated || 0) - new Date(a.lastUpdated || 0));
                       setCloudVersionsList(versions);
                       
-                      // 預設讀取最新的一筆資料
                       const latest = versions[0];
                       setCurrentCloudDocId(latest.id);
                       if (latest.salesPeriods) setSalesPeriods(latest.salesPeriods);
@@ -288,7 +287,6 @@
                       if (latest.googleSheetUrl !== undefined) setGoogleSheetUrl(latest.googleSheetUrl);
                       if (latest.gasWebappUrl !== undefined) setGasWebappUrl(latest.gasWebappUrl);
                     } else {
-                      // 若雲端完全沒有資料，建立第一筆預設存檔
                       const defaultPayload = {
                         title: '預設成本試算表',
                         salesPeriods,
@@ -298,7 +296,7 @@
                         gasWebappUrl,
                         lastUpdated: new Date().toISOString()
                       };
-                      const newDocRef = await window.firebaseService.addDoc(sheetsRef, defaultPayload);
+                      const newDocRef = await addDoc(sheetsRef, defaultPayload);
                       setCurrentCloudDocId(newDocRef.id);
                       setCloudVersionsList([{ id: newDocRef.id, ...defaultPayload }]);
                     }
@@ -394,7 +392,48 @@
           }
         };
 
-        // 3. 讀取指定的雲端試算表版本
+        // 3. 刪除指定的雲端試算表版本
+        const handleDeleteCloudVersion = async (e, versionId, versionTitle) => {
+          e.stopPropagation(); // 避免觸發點擊選取
+          if (!user || !window.firebaseService) return;
+
+          if (cloudVersionsList.length <= 1) {
+            alert("保留至少一份雲端試算表，無法全部刪除！");
+            return;
+          }
+
+          if (!confirm(`確定要永久刪除雲端試算表「${versionTitle || '未命名'}」嗎？`)) return;
+
+          const { db, doc, deleteDoc } = window.firebaseService;
+          try {
+            setSyncStatus('Syncing...');
+            const docRef = doc(db, 'users', user.uid, 'sheets', versionId);
+            await deleteDoc(docRef);
+
+            const remaining = cloudVersionsList.filter(v => v.id !== versionId);
+            setCloudVersionsList(remaining);
+
+            // 如果刪除的是目前正在檢視的檔案，自動切換到清單中的第一個
+            if (currentCloudDocId === versionId) {
+              const nextTarget = remaining[0];
+              setCurrentCloudDocId(nextTarget.id);
+              setSalesPeriods(nextTarget.salesPeriods || []);
+              setExchangeRate(nextTarget.exchangeRate || '31.5');
+              setTheme(nextTarget.theme || defaultTheme);
+              setGoogleSheetUrl(nextTarget.googleSheetUrl || '');
+              setGasWebappUrl(nextTarget.gasWebappUrl || '');
+            }
+
+            setSyncStatus('Synced');
+            setExportNotice(`已成功刪除雲端試算表：${versionTitle || '未命名'}`);
+            setTimeout(() => setExportNotice(''), 3000);
+          } catch (err) {
+            console.error("Delete cloud sheet error:", err);
+            setSyncStatus('Sync failed');
+          }
+        };
+
+        // 4. 讀取指定的雲端試算表版本
         const handleSelectCloudVersion = (versionId) => {
           const target = cloudVersionsList.find(v => v.id === versionId);
           if (!target) return;
@@ -415,7 +454,7 @@
           setTimeout(() => setExportNotice(''), 3000);
         };
 
-        // 4. 自動儲存與同步回目前選擇的雲端文檔
+        // 5. 自動儲存與同步回目前選擇的雲端文檔
         useEffect(() => {
           localStorage.setItem('moc_googleSheetUrl', googleSheetUrl);
           localStorage.setItem('moc_gasWebappUrl', gasWebappUrl);
@@ -442,12 +481,10 @@
           const { db, doc, setDoc } = window.firebaseService;
           setSyncStatus('Syncing...');
 
-          // 更新指定的 Firestore 文檔
           const docRef = doc(db, 'users', user.uid, 'sheets', currentCloudDocId);
           setDoc(docRef, payload, { merge: true })
             .then(async () => {
               setSyncStatus('Synced');
-              // 同步更新本地端版本清單中的該筆時間與內容
               setCloudVersionsList(prev => prev.map(v => v.id === currentCloudDocId ? { ...v, ...payload } : v));
               
               if (window.syncToGoogleAppsScript) {
@@ -986,7 +1023,7 @@
                   </div>
                   <div className="font-sans">
                     <h1 className="text-[16.7px] sm:text-[18.7px] font-bold tracking-tight font-sans" style={{ color: theme.headerTextColor }}>週邊成本試算表</h1>
-                    <p className="text-[12.7px] text-white/80 font-normal">多場次與海外通販財務試算工具 (支援多雲端版本切換)</p>
+                    <p className="text-[12.7px] text-white/80 font-normal">多場次與海外通販財務試算工具 (支援多雲端版本切換與刪除)</p>
                   </div>
                 </div>
 
@@ -1043,7 +1080,7 @@
                   </div>
 
                   <p className="text-slate-600 text-[12px]">
-                    您可以點選下方不同的雲端存檔版本來載入、修改資料。修改後的內容將**自動同步並覆寫**回您目前選取的雲端版本中。
+                    您可以點選下方不同的雲端存檔版本來載入、修改資料。修改後的內容將**自動同步並覆寫**回您目前選取的雲端版本中。也可點擊垃圾桶刪除不要的雲端表單。
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[300px] overflow-y-auto pr-1">
@@ -1059,15 +1096,24 @@
                               : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300'
                           }`}
                         >
-                          <div className="flex justify-between items-start">
+                          <div className="flex justify-between items-start gap-2">
                             <span className="font-bold text-[14.7px] text-slate-800 truncate" title={ver.title}>
                               {ver.title || '未命名成本試算表'}
                             </span>
-                            {isSelected && (
-                              <span className="bg-sky-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                目前載入中
-                              </span>
-                            )}
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              {isSelected && (
+                                <span className="bg-sky-600 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
+                                  目前載入中
+                                </span>
+                              )}
+                              <button
+                                onClick={(e) => handleDeleteCloudVersion(e, ver.id, ver.title)}
+                                className="text-slate-400 hover:text-red-600 p-1 rounded transition-colors"
+                                title="刪除此雲端表單"
+                              >
+                                <Icons.Trash />
+                              </button>
+                            </div>
                           </div>
                           <div className="text-[11px] text-slate-500 flex justify-between items-center pt-1 border-t border-slate-100">
                             <span>最後更新: {new Date(ver.lastUpdated || Date.now()).toLocaleString('zh-TW')}</span>
