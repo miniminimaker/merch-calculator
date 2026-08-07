@@ -175,7 +175,7 @@
         
         const [theme, setTheme] = useState(defaultTheme);
         const [salesPeriods, setSalesPeriods] = useState([
-          { id: 1, isLocked: false, preorderTime: '', productionTime: '', vendors: [{ id: 101, vendorName: '', shippingCost: '', items: [{ id: 1001, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] }], packagings: [] }
+          { id: 1, isLocked: false, preorderTime: '', productionTime: '', vendors: [{ id: 101, vendorName: '', shippingCost: '', items: [{ id: 1001, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] }], packagings: [] }
         ]);
 
         const [currentDocId, setCurrentDocId] = useState('sheet_' + Date.now());
@@ -386,7 +386,7 @@
         const handleAddSalesPeriod = () => {
           const newSp = {
             id: Date.now(), isLocked: false, preorderTime: '', productionTime: '',
-            vendors: [{ id: Date.now() + 1, vendorName: '', shippingCost: '', items: [{ id: Date.now() + 2, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] }],
+            vendors: [{ id: Date.now() + 1, vendorName: '', shippingCost: '', items: [{ id: Date.now() + 2, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] }],
             packagings: []
           };
           setSalesPeriods([...salesPeriods, newSp]);
@@ -397,7 +397,7 @@
         const handleSalesPeriodFieldChange = (spId, field, value) => { setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, [field]: value } : sp)); };
         
         const handleAddVendor = (spId) => {
-          const newVendor = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] };
+          const newVendor = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' }] };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, vendors: [...sp.vendors, newVendor] } : sp));
         };
         const handleDeleteVendor = (spId, vendorId) => { setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, vendors: sp.vendors.filter(v => v.id !== vendorId) } : sp)); };
@@ -412,7 +412,7 @@
         };
 
         const handleAddItem = (spId, vendorId) => {
-          const newItem = { id: Date.now(), itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' };
+          const newItem = { id: Date.now(), itemTitle: '', productName: '', specs: '', style: '', notes: '', printQty: '', unitCost: '', otherFee: '', twdPrice: '', taiwanSalesQty: '', usdPrice: '', overseasSalesQty: '' };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, vendors: sp.vendors.map(v => v.id === vendorId ? { ...v, items: [...v.items, newItem] } : v) } : sp));
         };
         const handleDeleteItem = (spId, vendorId, itemId) => {
@@ -435,7 +435,7 @@
         };
 
         const handleAddPackaging = (spId) => {
-          const newPkg = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '' }] };
+          const newPkg = { id: Date.now(), vendorName: '', shippingCost: '', items: [{ id: Date.now() + 1, packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '', otherFee: '' }] };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: [...(sp.packagings || []), newPkg] } : sp));
         };
         const handleDeletePackaging = (spId, pkgId) => { setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: sp.packagings.filter(p => p.id !== pkgId) } : sp)); };
@@ -443,7 +443,7 @@
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: sp.packagings.map(p => p.id === pkgId ? { ...p, [field]: value } : p) } : sp));
         };
         const handleAddPkgItem = (spId, pkgId) => {
-          const newItem = { id: Date.now(), packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '' };
+          const newItem = { id: Date.now(), packagingTitle: '', style: '', specs: '', notes: '', qty: '', unitCost: '', otherFee: '' };
           setSalesPeriods(salesPeriods.map(sp => sp.id === spId && !sp.isLocked ? { ...sp, packagings: sp.packagings.map(p => p.id === pkgId ? { ...p, items: [...(p.items || []), newItem] } : p) } : sp));
         };
         const handleDeletePkgItem = (spId, pkgId, itemId) => {
@@ -476,8 +476,9 @@
               const rawItems = (vendor.items || []).map(item => {
                 const printQty = parseFloat(item.printQty) || 0;
                 const unitCost = parseFloat(item.unitCost) || 0;
-                const totalCost = printQty * unitCost;
-                return { ...item, printQty, unitCost, totalCost };
+                const otherFee = parseFloat(item.otherFee) || 0;
+                const totalCost = (printQty * unitCost) + otherFee;
+                return { ...item, printQty, unitCost, otherFee, totalCost };
               });
               const totalVendorItemsAmount = rawItems.reduce((sum, item) => sum + item.totalCost, 0);
               periodTotalCost += totalVendorItemsAmount + vendorShipping;
@@ -511,8 +512,9 @@
               const rawPkgItems = itemsList.map(item => {
                 const qty = parseFloat(item.qty) || 0;
                 const unitCost = parseFloat(item.unitCost) || 0;
-                const totalCost = qty * unitCost;
-                return { ...item, qty, unitCost, totalCost };
+                const otherFee = parseFloat(item.otherFee) || 0;
+                const totalCost = (qty * unitCost) + otherFee;
+                return { ...item, qty, unitCost, otherFee, totalCost };
               });
               const totalPkgItemsAmount = rawPkgItems.reduce((sum, item) => sum + item.totalCost, 0);
               periodTotalCost += totalPkgItemsAmount + vendorShipping;
@@ -784,9 +786,10 @@
                                   <div><label className="block font-semibold mb-1 text-slate-500 text-[11.7px]">備註</label><input type="text" value={item.notes} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'notes', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/50" /></div>
                                 </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                                   <div className="bg-blue-50/40 p-2.5 rounded-xl border border-blue-100"><label className="block font-bold mb-1 text-blue-700 text-[11.7px]">印製數量</label><input type="text" inputMode="decimal" value={item.printQty} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'printQty', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-blue-200 bg-white font-bold" /></div>
                                   <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200"><label className="block font-bold mb-1 text-slate-700 text-[11.7px]">成本單價</label><input type="text" inputMode="decimal" value={item.unitCost} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'unitCost', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-bold" /></div>
+                                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200"><label className="block font-bold mb-1 text-slate-700 text-[11.7px]">其他費用</label><input type="text" inputMode="decimal" value={item.otherFee} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'otherFee', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-bold" /></div>
                                 </div>
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
@@ -850,11 +853,12 @@
                                   <button onClick={() => handleDeletePkgItem(sp.id, pkgVendor.id, pkg.id)} disabled={sp.isLocked} className="text-slate-400 hover:text-red-600 p-1"><Icons.Trash /></button>
                                 </div>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
                                   <div><label className="block font-semibold mb-1 text-slate-500 text-[11.7px]">款式</label><input type="text" value={pkg.style} disabled={sp.isLocked} onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'style', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/50" /></div>
                                   <div><label className="block font-semibold mb-1 text-slate-500 text-[11.7px]">規格</label><input type="text" value={pkg.specs} disabled={sp.isLocked} onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'specs', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/50" /></div>
                                   <div><label className="block font-semibold mb-1 text-slate-500 text-[11.7px]">數量</label><input type="text" inputMode="decimal" value={pkg.qty} disabled={sp.isLocked} onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'qty', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/50 font-bold" /></div>
                                   <div><label className="block font-semibold mb-1 text-slate-500 text-[11.7px]">單價成本</label><input type="text" inputMode="decimal" value={pkg.unitCost} disabled={sp.isLocked} onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'unitCost', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/50 font-bold" /></div>
+                                  <div><label className="block font-semibold mb-1 text-slate-500 text-[11.7px]">其他費用</label><input type="text" inputMode="decimal" value={pkg.otherFee} disabled={sp.isLocked} onChange={(e) => handlePkgItemFieldChange(sp.id, pkgVendor.id, pkg.id, 'otherFee', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 bg-slate-50/50 font-bold" /></div>
                                 </div>
                               </div>
                             ))}
@@ -889,4 +893,3 @@
     </script>
 </body>
 </html>
-```eof
