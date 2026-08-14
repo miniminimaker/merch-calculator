@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>週邊成本試算表與訂單管理 (規格版)</title>
+    <title>週邊成本試算表與訂單管理 (幣別區分版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -18,6 +18,8 @@
         .custom-checkbox input:checked + div svg {
             display: block;
         }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800">
@@ -121,22 +123,27 @@
               return {
                 id: it.id || 'item_' + Date.now() + '_' + idx,
                 productName: it.productName || it.itemTitle || '',
+                style: it.style || '',
                 quantity: it.quantity || '',
                 unitPrice: uPrice
               };
             });
           } else {
-            formattedItems = [{ id: 'item_' + Date.now(), productName: '', quantity: '', unitPrice: '' }];
+            formattedItems = [{ id: 'item_' + Date.now(), productName: '', style: '', quantity: '', unitPrice: '' }];
           }
+
+          const legacyHasUSD = parseFloat(o.paymentUSD) > 0;
 
           return {
             id: o.id || 'order_' + Date.now() + Math.random(),
+            orderType: o.orderType || (legacyHasUSD ? 'USD' : 'TWD'),
             orderDate: o.orderDate || new Date().toISOString().split('T')[0],
             shippingDate: o.shippingDate || '',
             shipped: !!o.shipped,
             nickname: o.nickname || '',
             items: formattedItems,
             paymentUSD: o.paymentUSD !== undefined ? o.paymentUSD : '',
+            preShippingFee: o.preShippingFee !== undefined ? o.preShippingFee : '',
             shippingFee: o.shippingFee !== undefined ? o.shippingFee : '',
             recipient: o.recipient || '',
             phone: o.phone || '',
@@ -191,7 +198,7 @@
           packagingBadgeBgColor: '#4C7F29', packagingHeaderBgColor: '#F1F9F3', packagingBoxBgColor: '#F8FAFC'
         };
 
-        const [activeTab, setActiveTab] = useState('cost');
+        const [activeTab, setActiveTab] = useState('orders');
         const [exchangeRate, setExchangeRate] = useState('31.5');
         const [showGoogleSheets, setShowGoogleSheets] = useState(false);
         const [gasWebappUrl, setGasWebappUrl] = useState('');
@@ -217,10 +224,27 @@
         const [orderStatusFilter, setOrderStatusFilter] = useState('all');
         const [editingOrderId, setEditingOrderId] = useState(null);
         
+        const generateDefaultDraft = () => ({
+          orderDate: new Date().toISOString().split('T')[0], 
+          shippingDate: '', 
+          shipped: false, 
+          nickname: '',
+          items: [{ id: 'item_' + Date.now() + Math.random(), productName: '', style: '', quantity: '', unitPrice: '' }],
+          preShippingFee: '', 
+          paymentUSD: '', 
+          shippingFee: '', 
+          recipient: '', 
+          phone: '', 
+          country: '', 
+          region: '', 
+          address: '', 
+          notes: ''
+        });
+
         const [orderForm, setOrderForm] = useState({
-          orderDate: new Date().toISOString().split('T')[0], shippingDate: '', shipped: false, nickname: '',
-          items: [{ id: 'item_' + Date.now(), productName: '', quantity: '', unitPrice: '' }],
-          paymentUSD: '', shippingFee: '', recipient: '', phone: '', country: '', region: '', address: '', notes: ''
+          activeType: 'TWD',
+          TWD: generateDefaultDraft(),
+          USD: generateDefaultDraft()
         });
 
         const [currentDocId, setCurrentDocId] = useState('sheet_' + Date.now());
@@ -231,6 +255,11 @@
         const [user, setUser] = useState(null);
         const [syncStatus, setSyncStatus] = useState('Offline');
         const isRemoteLoading = useRef(false);
+
+        const [modalState, setModalState] = useState({ type: null, title: '', message: '', onConfirm: null, onCancel: null, inputPlaceholder: '', inputValue: '' });
+        const showAlert = (msg, title="提示") => setModalState({ type: 'alert', title, message: msg, onConfirm: () => setModalState({type: null}) });
+        const showConfirm = (msg, onConfirm, title="確認") => setModalState({ type: 'confirm', title, message: msg, onConfirm: () => { onConfirm(); setModalState({type: null}); }, onCancel: () => setModalState({type: null}) });
+        const showPrompt = (msg, defaultVal, onConfirm, title="輸入") => setModalState({ type: 'prompt', title, message: msg, inputValue: defaultVal, onConfirm: (val) => { onConfirm(val); setModalState({type: null}); }, onCancel: () => setModalState({type: null}) });
 
         useEffect(() => {
           const checkFirebaseReady = () => {
@@ -305,7 +334,7 @@
 
         const handleLoadGoogleSheetVersions = async () => {
           if (!gasWebappUrl) {
-            alert("請先填寫 Google Apps Script 網址！");
+            showAlert("請先填寫 Google Apps Script 網址！");
             setShowGoogleSheets(true);
             return;
           }
@@ -315,9 +344,9 @@
             const versions = await window.fetchGoogleSheetVersions(gasWebappUrl);
             setSheetVersions(versions);
             setSyncStatus('Synced');
-            if (versions.length === 0) alert("Google 試算表中尚無任何存檔清單。");
+            if (versions.length === 0) showAlert("Google 試算表中尚無任何存檔清單。");
           } catch (err) {
-            alert("讀取失敗：" + err.message);
+            showAlert("讀取失敗：" + err.message);
             setSyncStatus('Sync failed');
           } finally {
             setIsLoadingSheet(false);
@@ -325,42 +354,43 @@
         };
 
         const handleSelectSheetVersion = (ver) => {
-          if (!user) { alert("請先登入 Google 帳號才能讀取雲端試算表！"); return; }
-          if (!confirm(`確定要從 Google 試算表讀取版本「${ver.title}」嗎？目前的未儲存資料將被覆蓋。`)) return;
-          
-          isRemoteLoading.current = true;
-          setCurrentDocId(ver.id);
-          setCurrentDocTitle(ver.title);
-          if (ver.payload) {
-            if (ver.payload.salesPeriods) setSalesPeriods(migrateLegacyData(ver.payload.salesPeriods));
-            if (ver.payload.exchangeRate) setExchangeRate(ver.payload.exchangeRate);
-            if (ver.payload.theme) setTheme(ver.payload.theme);
-            if (ver.payload.orders) setOrders(sanitizeOrders(ver.payload.orders));
-          }
-          setTimeout(() => { isRemoteLoading.current = false; }, 300);
-          setExportNotice(`已成功從 Google 試算表讀取：${ver.title}`);
-          setTimeout(() => setExportNotice(''), 4000);
+          if (!user) { showAlert("請先登入 Google 帳號才能讀取雲端試算表！"); return; }
+          showConfirm(`確定要從 Google 試算表讀取版本「${ver.title}」嗎？目前的未儲存資料將被覆蓋。`, () => {
+              isRemoteLoading.current = true;
+              setCurrentDocId(ver.id);
+              setCurrentDocTitle(ver.title);
+              if (ver.payload) {
+                if (ver.payload.salesPeriods) setSalesPeriods(migrateLegacyData(ver.payload.salesPeriods));
+                if (ver.payload.exchangeRate) setExchangeRate(ver.payload.exchangeRate);
+                if (ver.payload.theme) setTheme(ver.payload.theme);
+                if (ver.payload.orders) setOrders(sanitizeOrders(ver.payload.orders));
+              }
+              setTimeout(() => { isRemoteLoading.current = false; }, 300);
+              setExportNotice(`已成功從 Google 試算表讀取：${ver.title}`);
+              setTimeout(() => setExportNotice(''), 4000);
+          });
         };
 
         const handleDeleteCloudVersion = async (ver) => {
-          if (!user) { alert("請先登入 Google 帳號！"); return; }
-          if (!confirm(`確定要從 Google 試算表中永久刪除版本「${ver.title}」嗎？此動作無法復原。`)) return;
-          try {
-            setSyncStatus('Syncing...');
-            await window.syncToGoogleAppsScript({ action: 'delete', docId: ver.id }, gasWebappUrl);
-            setSyncStatus('Synced');
-            setExportNotice(`已成功從 Google 試算表中刪除：${ver.title}`);
-            setTimeout(() => setExportNotice(''), 4000);
-            handleLoadGoogleSheetVersions();
-          } catch (err) {
-            alert("刪除失敗：" + err.message);
-            setSyncStatus('Sync failed');
-          }
+          if (!user) { showAlert("請先登入 Google 帳號！"); return; }
+          showConfirm(`確定要從 Google 試算表中永久刪除版本「${ver.title}」嗎？此動作無法復原。`, async () => {
+              try {
+                setSyncStatus('Syncing...');
+                await window.syncToGoogleAppsScript({ action: 'delete', docId: ver.id }, gasWebappUrl);
+                setSyncStatus('Synced');
+                setExportNotice(`已成功從 Google 試算表中刪除：${ver.title}`);
+                setTimeout(() => setExportNotice(''), 4000);
+                handleLoadGoogleSheetVersions();
+              } catch (err) {
+                showAlert("刪除失敗：" + err.message);
+                setSyncStatus('Sync failed');
+              }
+          });
         };
 
         const handleManualSyncToCloud = async () => {
-          if (!user) { alert("請先登入 Google 帳號才能覆蓋儲存至雲端試算表！"); return; }
-          if (!gasWebappUrl) { alert("請先填寫 Google Apps Script 網址！"); setShowGoogleSheets(true); return; }
+          if (!user) { showAlert("請先登入 Google 帳號才能覆蓋儲存至雲端試算表！"); return; }
+          if (!gasWebappUrl) { showAlert("請先填寫 Google Apps Script 網址！"); setShowGoogleSheets(true); return; }
 
           const payload = {
             docId: currentDocId, title: currentDocTitle, salesPeriods, exchangeRate, theme, orders, lastUpdated: new Date().toISOString()
@@ -376,21 +406,22 @@
             setTimeout(() => setExportNotice(''), 4000);
             handleLoadGoogleSheetVersions();
           } catch (err) {
-            alert("覆蓋儲存失敗：" + err.message);
+            showAlert("覆蓋儲存失敗：" + err.message);
             setSyncStatus('Sync failed');
           }
         };
 
         const handleCreateNewSheetVersion = () => {
-          if (!user) { alert("請先登入 Google 帳號！"); return; }
-          const newTitle = prompt("請輸入新試算表/標題名稱：", `成本試算表_${new Date().toLocaleDateString()}`);
-          if (!newTitle) return;
-          const newId = 'sheet_' + Date.now();
-          setCurrentDocId(newId);
-          setCurrentDocTitle(newTitle);
-          setSalesPeriods([{ id: Date.now(), isLocked: false, preorderTime: newTitle, productionTime: '', vendors: [], packagings: [] }]);
-          setExportNotice(`已建立新表單：${newTitle}，點擊「覆蓋儲存到此雲端試算表」即可寫入 Google 試算表`);
-          setTimeout(() => setExportNotice(''), 4000);
+          if (!user) { showAlert("請先登入 Google 帳號！"); return; }
+          showPrompt("請輸入新試算表/標題名稱：", `成本試算表_${new Date().toLocaleDateString()}`, (newTitle) => {
+              if (!newTitle) return;
+              const newId = 'sheet_' + Date.now();
+              setCurrentDocId(newId);
+              setCurrentDocTitle(newTitle);
+              setSalesPeriods([{ id: Date.now(), isLocked: false, preorderTime: newTitle, productionTime: '', vendors: [], packagings: [] }]);
+              setExportNotice(`已建立新表單：${newTitle}，點擊「覆蓋儲存到此雲端試算表」即可寫入 Google 試算表`);
+              setTimeout(() => setExportNotice(''), 4000);
+          });
         };
 
         const handleAddSalesPeriod = () => {
@@ -492,75 +523,222 @@
         };
 
         const handleOrderFormChange = (field, value) => {
+          if (field === 'activeType') {
+             setOrderForm(prev => ({ ...prev, activeType: value }));
+             return;
+          }
           setOrderForm(prev => {
-            const updated = { ...prev, [field]: value };
-            if (field === 'shipped' && value === true && !updated.shippingDate) {
-              updated.shippingDate = new Date().toISOString().split('T')[0];
+            const activeDraft = { ...prev[prev.activeType], [field]: value };
+            if (field === 'shipped' && value === true && !activeDraft.shippingDate) {
+              activeDraft.shippingDate = new Date().toISOString().split('T')[0];
             }
-            return updated;
+            return { ...prev, [prev.activeType]: activeDraft };
           });
         };
-        const handleAddOrderItem = () => { setOrderForm(prev => ({ ...prev, items: [...prev.items, { id: 'item_' + Date.now() + Math.random(), productName: '', quantity: '', unitPrice: '' }] })); };
-        const handleDeleteOrderItem = (itemId) => { setOrderForm(prev => { if (prev.items.length <= 1) { alert("每筆訂單至少須包含一個購買品項！"); return prev; } return { ...prev, items: prev.items.filter(it => it.id !== itemId) }; }); };
-        const handleOrderItemChange = (itemId, field, value) => { setOrderForm(prev => ({ ...prev, items: prev.items.map(it => it.id === itemId ? { ...it, [field]: value } : it) })); };
+
+        const handleAddOrderItem = () => { 
+          setOrderForm(prev => {
+            const activeDraft = prev[prev.activeType];
+            const newItem = { id: 'item_' + Date.now() + Math.random(), productName: '', style: '', quantity: '', unitPrice: '' };
+            return { ...prev, [prev.activeType]: { ...activeDraft, items: [...activeDraft.items, newItem] } };
+          }); 
+        };
+
+        const handleDeleteOrderItem = (itemId) => { 
+          setOrderForm(prev => { 
+            const activeDraft = prev[prev.activeType];
+            if (activeDraft.items.length <= 1) { showAlert("每筆訂單至少須包含一個購買品項！"); return prev; } 
+            return { ...prev, [prev.activeType]: { ...activeDraft, items: activeDraft.items.filter(it => it.id !== itemId) } };
+          }); 
+        };
+
+        const handleOrderItemChange = (itemId, field, value) => { 
+          setOrderForm(prev => {
+            const activeDraft = prev[prev.activeType];
+            return { ...prev, [prev.activeType]: { ...activeDraft, items: activeDraft.items.map(it => it.id === itemId ? { ...it, [field]: value } : it) } };
+          }); 
+        };
+        
         const handleSaveOrder = (e) => {
           e.preventDefault();
-          if (!orderForm.nickname && !orderForm.recipient && orderForm.items.every(it => !it.productName.trim())) { alert("請至少填寫買家暱稱、收件人或其中一個購買品項！"); return; }
+          const activeDraft = orderForm[orderForm.activeType];
+
+          if (!activeDraft.nickname && !activeDraft.recipient && activeDraft.items.every(it => !it.productName.trim())) { 
+            showAlert("請至少填寫買家暱稱、收件人或其中一個購買品項！"); 
+            return; 
+          }
+
+          const orderToSave = {
+            ...activeDraft,
+            orderType: orderForm.activeType,
+            id: editingOrderId || 'order_' + Date.now()
+          };
+
           if (editingOrderId) {
-            setOrders(orders.map(o => o.id === editingOrderId ? { ...orderForm, id: editingOrderId } : o));
+            setOrders(orders.map(o => o.id === editingOrderId ? orderToSave : o));
             setEditingOrderId(null);
             setExportNotice("已成功更新訂單！");
           } else {
-            setOrders([{ ...orderForm, id: 'order_' + Date.now() }, ...orders]);
+            setOrders([orderToSave, ...orders]);
             setExportNotice("已成功新增訂單！");
           }
           setTimeout(() => setExportNotice(''), 3000);
+          
           setOrderForm({
-            orderDate: new Date().toISOString().split('T')[0], shippingDate: '', shipped: false, nickname: '',
-            items: [{ id: 'item_' + Date.now(), productName: '', quantity: '', unitPrice: '' }],
-            paymentUSD: '', shippingFee: '', recipient: '', phone: '', country: '', region: '', address: '', notes: ''
+            activeType: 'TWD',
+            TWD: generateDefaultDraft(),
+            USD: generateDefaultDraft()
           });
         };
+
         const handleEditOrder = (order) => {
           setEditingOrderId(order.id);
+          const isUSD = order.orderType === 'USD' || parseFloat(order.paymentUSD) > 0;
+          const type = isUSD ? 'USD' : 'TWD';
+
           let parsedItems = Array.isArray(order.items) && order.items.length > 0 ? order.items.map((it, idx) => {
             let uPrice = it.unitPrice !== undefined ? it.unitPrice : '';
             if (uPrice === '' && it.amount !== undefined && it.quantity) { const amt = parseFloat(it.amount) || 0; const qty = parseFloat(it.quantity) || 1; if (qty > 0) uPrice = (amt / qty).toString(); }
-            return { id: it.id || 'item_' + Date.now() + '_' + idx, productName: it.productName || it.itemTitle || '', quantity: it.quantity || '', unitPrice: uPrice };
-          }) : [{ id: 'item_' + Date.now(), productName: '', quantity: '', unitPrice: '' }];
+            return { id: it.id || 'item_' + Date.now() + '_' + idx, productName: it.productName || it.itemTitle || '', style: it.style || '', quantity: it.quantity || '', unitPrice: uPrice };
+          }) : [{ id: 'item_' + Date.now(), productName: '', style: '', quantity: '', unitPrice: '' }];
+          
+          const editedDraft = {
+            orderDate: order.orderDate || new Date().toISOString().split('T')[0], 
+            shippingDate: order.shippingDate || '', 
+            shipped: !!order.shipped, 
+            nickname: order.nickname || '',
+            items: parsedItems,
+            preShippingFee: order.preShippingFee !== undefined ? order.preShippingFee : '',
+            paymentUSD: order.paymentUSD !== undefined ? order.paymentUSD : '', 
+            shippingFee: order.shippingFee !== undefined ? order.shippingFee : '',
+            recipient: order.recipient || '', 
+            phone: order.phone || '', 
+            country: order.country || '', 
+            region: order.region || '', 
+            address: order.address || '', 
+            notes: order.notes || ''
+          };
+
           setOrderForm({
-            orderDate: order.orderDate || new Date().toISOString().split('T')[0], shippingDate: order.shippingDate || '', shipped: !!order.shipped, nickname: order.nickname || '',
-            items: parsedItems, paymentUSD: order.paymentUSD !== undefined ? order.paymentUSD : '', shippingFee: order.shippingFee !== undefined ? order.shippingFee : '',
-            recipient: order.recipient || '', phone: order.phone || '', country: order.country || '', region: order.region || '', address: order.address || '', notes: order.notes || ''
+            activeType: type,
+            TWD: type === 'TWD' ? editedDraft : generateDefaultDraft(),
+            USD: type === 'USD' ? editedDraft : generateDefaultDraft()
           });
           window.scrollTo({ top: 0, behavior: 'smooth' });
         };
+
         const handleCancelEditOrder = () => {
           setEditingOrderId(null);
-          setOrderForm({ orderDate: new Date().toISOString().split('T')[0], shippingDate: '', shipped: false, nickname: '', items: [{ id: 'item_' + Date.now(), productName: '', quantity: '', unitPrice: '' }], paymentUSD: '', shippingFee: '', recipient: '', phone: '', country: '', region: '', address: '', notes: '' });
+          setOrderForm({
+            activeType: 'TWD',
+            TWD: generateDefaultDraft(),
+            USD: generateDefaultDraft()
+          });
         };
-        const handleDeleteOrder = (orderId) => { if (!confirm("確定要刪除這筆訂單嗎？")) return; setOrders(orders.filter(o => o.id !== orderId)); setExportNotice("已刪除該筆訂單"); setTimeout(() => setExportNotice(''), 3000); };
+
+        const handleDeleteOrder = (orderId) => { 
+          showConfirm("確定要刪除這筆訂單嗎？", () => {
+            setOrders(orders.filter(o => o.id !== orderId)); 
+            setExportNotice("已刪除該筆訂單"); 
+            setTimeout(() => setExportNotice(''), 3000); 
+          });
+        };
 
         const currentFormTotals = useMemo(() => {
           const globalRate = parseFloat(exchangeRate) || 0;
-          const productTotal = (orderForm.items || []).reduce((sum, item) => sum + ((parseFloat(item.quantity) || 0) * (parseFloat(item.unitPrice) || 0)), 0);
-          const usdVal = parseFloat(orderForm.paymentUSD) || 0;
-          const usdConverted = Math.round(usdVal * globalRate);
-          const shipping = parseFloat(orderForm.shippingFee) || 0;
-          return { productTotal, usdConverted, shipping, totalPayment: productTotal + usdConverted + shipping };
+          const type = orderForm.activeType;
+          const draft = orderForm[type];
+          
+          let itemsTotal = (draft.items || []).reduce((sum, item) => sum + ((parseFloat(item.quantity) || 0) * (parseFloat(item.unitPrice) || 0)), 0);
+
+          const preShipping = parseFloat(draft.preShippingFee) || 0;
+          const hasActualShipping = draft.shippingFee !== undefined && draft.shippingFee !== '';
+          const actualShipping = parseFloat(draft.shippingFee) || 0;
+          
+          let totalUSD = 0;
+          let usdConverted = 0;
+          let preShippingTWD = 0;
+          let shippingBalance = 0;
+          let totalPayment = 0;
+
+          if (type === 'USD') {
+              totalUSD = itemsTotal + preShipping;
+              usdConverted = Math.round(totalUSD * globalRate);
+              preShippingTWD = Math.round(preShipping * globalRate);
+
+              if (hasActualShipping) {
+                  shippingBalance = preShippingTWD - actualShipping;
+              }
+              totalPayment = totalUSD; 
+          } else {
+              preShippingTWD = preShipping;
+
+              if (hasActualShipping) {
+                  shippingBalance = preShippingTWD - actualShipping; 
+              }
+              totalPayment = itemsTotal + preShippingTWD;
+          }
+
+          const legacyUSD = parseFloat(draft.paymentUSD) || 0;
+          if (legacyUSD > 0 && type !== 'USD') {
+             usdConverted += Math.round(legacyUSD * globalRate);
+             totalPayment += Math.round(legacyUSD * globalRate);
+          }
+          
+          return { 
+              itemsTotal, 
+              totalUSD, 
+              usdConverted, 
+              preShippingTWD,
+              hasActualShipping,
+              actualShipping,
+              shippingBalance,
+              totalPayment,
+              legacyUSD
+          };
         }, [orderForm, exchangeRate]);
 
         const orderStats = useMemo(() => {
           const globalRate = parseFloat(exchangeRate) || 0;
-          let sumProductTotal = 0, sumUSD = 0, sumUSDCond = 0, sumShipping = 0, sumGrandTotal = 0;
+          let sumProductTWD = 0, sumProductUSD = 0, sumGrandTotal = 0;
+          
           orders.forEach(o => {
-            const pTotal = (o.items || []).reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0)), 0);
-            const uVal = parseFloat(o.paymentUSD) || 0;
-            const uCond = Math.round(uVal * globalRate);
-            const sVal = parseFloat(o.shippingFee) || 0;
-            sumProductTotal += pTotal; sumUSD += uVal; sumUSDCond += uCond; sumShipping += sVal; sumGrandTotal += (pTotal + uCond + sVal);
+            const type = o.orderType || (parseFloat(o.paymentUSD) > 0 ? 'USD' : 'TWD');
+            const itemsSum = (o.items || []).reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0)), 0);
+            
+            const preSVal = parseFloat(o.preShippingFee) || 0;
+            const hasActualShipping = o.shippingFee !== undefined && o.shippingFee !== '';
+            const actualSVal = parseFloat(o.shippingFee) || 0;
+            
+            let orderGrandTotalTWD = 0;
+
+            if (type === 'USD') {
+                sumProductUSD += itemsSum;
+                const totalUSD = itemsSum + preSVal;
+                const converted = Math.round(totalUSD * globalRate);
+                orderGrandTotalTWD = converted;
+            } else {
+                sumProductTWD += itemsSum;
+                orderGrandTotalTWD = itemsSum + preSVal;
+            }
+
+            const oldUsd = parseFloat(o.paymentUSD) || 0;
+            if (oldUsd > 0 && type !== 'USD') {
+                sumProductUSD += oldUsd;
+                orderGrandTotalTWD += Math.round(oldUsd * globalRate);
+            }
+
+            sumGrandTotal += orderGrandTotalTWD;
           });
-          return { totalOrdersCount: orders.length, unshippedCount: orders.filter(o => !o.shipped).length, shippedCount: orders.filter(o => o.shipped).length, sumProductTotal, sumUSD, sumUSDCond, sumShipping, sumGrandTotal };
+          
+          return { 
+              totalOrdersCount: orders.length, 
+              unshippedCount: orders.filter(o => !o.shipped).length, 
+              shippedCount: orders.filter(o => o.shipped).length, 
+              sumProductTWD, 
+              sumProductUSD, 
+              sumGrandTotal 
+          };
         }, [orders, exchangeRate]);
 
         const filteredOrders = useMemo(() => {
@@ -575,7 +753,6 @@
           });
         }, [orders, orderStatusFilter, orderSearchQuery]);
 
-        // 🏆 核心運費分攤與損益計算
         const calculatedData = useMemo(() => {
           const globalRate = parseFloat(exchangeRate) || 0;
           return salesPeriods.map(sp => {
@@ -598,12 +775,10 @@
               const activeVendorItems = rawItems.filter(item => !item.excludeFromTotal);
               const totalVendorItemsAmount = activeVendorItems.reduce((sum, item) => sum + item.totalCost, 0);
 
-              // 迴圈分攤該廠運費到每個未排除的主商品中 (帶尾差自動修正)
               let allocatedShippingSum = 0;
               const calculatedItems = rawItems.map((item, index) => {
                 let itemShipping = 0;
                 if (!item.excludeFromTotal) {
-                  // 如果是最後一個項目，吃掉所有剩餘的運費尾差，保證加總完全等於 vendorShipping
                   if (index === rawItems.length - 1) {
                     itemShipping = vendorShipping - allocatedShippingSum;
                   } else if (totalVendorItemsAmount > 0) {
@@ -615,7 +790,7 @@
                   }
                 }
 
-                const finalItemCost = item.totalCost + itemShipping; // 含運費的商品總成本
+                const finalItemCost = item.totalCost + itemShipping;
 
                 let itemTotalPrintQty = 0;
                 let itemTotalTaiwanSalesQty = 0;
@@ -639,7 +814,6 @@
                 const itemOverseasRevenue = itemTotalOverseasSalesQty * usdToTwdPrice;
                 const itemTotalRevenue = itemTaiwanRevenue + itemOverseasRevenue;
                 
-                // 損益 = 總收入 - 含運費總成本
                 const itemProfitAndLoss = itemTotalRevenue - finalItemCost;
                 const itemTotalSalesQty = itemTotalTaiwanSalesQty + itemTotalOverseasSalesQty;
 
@@ -653,7 +827,7 @@
                   variants: calculatedVariants,
                   itemTotalPrintQty, 
                   itemTotalSalesQty, 
-                  itemTotalCost: finalItemCost, // 把含運成本直接指定為總成本
+                  itemTotalCost: finalItemCost,
                   itemShipping,
                   itemTotalRevenue, 
                   itemProfitAndLoss,
@@ -664,7 +838,6 @@
               return { ...vendor, items: calculatedItems };
             });
 
-            // 包材計算 (運費同樣分攤進包材成本中)
             const calculatedPackagings = (sp.packagings || []).map(pkgVendor => {
               const vendorShipping = parseFloat(pkgVendor.shippingCost) || 0;
               const rawPkgItems = (pkgVendor.items || []).map(item => {
@@ -707,8 +880,33 @@
           });
         }, [salesPeriods, exchangeRate]);
 
+        const activeDraft = orderForm[orderForm.activeType];
+
         return (
           <div className="min-h-screen bg-slate-100 p-3 sm:p-6 font-sans text-[12.7px] sm:text-[14.7px]">
+            {/* Modal Layer */}
+            {modalState.type && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden flex flex-col">
+                        <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+                            <span className="font-bold text-slate-800 text-[15px]">{modalState.title}</span>
+                        </div>
+                        <div className="p-5 flex flex-col gap-4">
+                            <p className="text-[13.7px] text-slate-600 font-medium">{modalState.message}</p>
+                            {modalState.type === 'prompt' && (
+                                <input type="text" autoFocus value={modalState.inputValue} onChange={(e) => setModalState({...modalState, inputValue: e.target.value})} className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none text-[13.7px]" />
+                            )}
+                        </div>
+                        <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+                            {(modalState.type === 'confirm' || modalState.type === 'prompt') && (
+                                <button onClick={modalState.onCancel} className="px-4 py-2 rounded-xl font-bold text-[13px] text-slate-600 hover:bg-slate-200 transition-colors">取消</button>
+                            )}
+                            <button onClick={() => modalState.onConfirm(modalState.inputValue)} className="px-4 py-2 rounded-xl font-bold text-[13px] bg-slate-900 text-white hover:bg-slate-800 transition-colors">確定</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col font-sans">
               
               <div className="p-4 sm:p-5 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-3 font-sans" style={{ backgroundColor: theme.headerBgColor }}>
@@ -721,7 +919,7 @@
                 </div>
                 <div className="flex items-center gap-2 flex-wrap font-sans w-full md:w-auto justify-end">
                   <button onClick={handleLoadGoogleSheetVersions} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12.7px] font-bold transition-all font-sans bg-amber-500 hover:bg-amber-600 text-white shadow-md border border-amber-400"><Icons.Cloud /> 讀取雲端試算表資料</button>
-                  <button onClick={handleManualSyncToCloud} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12.7px] font-bold transition-all font-sans bg-emerald-600 hover:bg-emerald-700 text-white shadow-md border border-emerald-500"><Icons.Save /> 覆蓋儲存到此雲端試算表</button>
+                  <button onClick={handleManualSyncToCloud} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-[12.7px] font-bold transition-all font-sans bg-emerald-600 hover:bg-emerald-700 text-white shadow-md border border-emerald-500"><Icons.Save /> 覆蓋儲存到此雲端</button>
                   <button onClick={() => setShowGoogleSheets(!showGoogleSheets)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-[12.7px] font-semibold transition-all font-sans bg-black/15 text-white hover:bg-black/25 border border-white/20 shadow-sm"><Icons.FileSpreadsheet /> 設定與網址</button>
                   {activeTab === 'cost' && <button onClick={handleAddSalesPeriod} className="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white px-3.5 py-2 rounded-xl text-[12.7px] font-bold transition-all shadow-md font-sans border border-slate-700"><Icons.Plus /> 新增販售</button>}
                 </div>
@@ -732,6 +930,7 @@
                 <button onClick={() => setActiveTab('orders')} className={`px-5 py-2.5 rounded-t-xl font-bold text-[13.7px] transition-all flex items-center gap-2 ${activeTab === 'orders' ? 'bg-white text-slate-800 shadow-sm border-t-2 border-slate-900' : 'bg-transparent text-slate-600 hover:bg-white/50'}`}><Icons.Package /> 訂單管理{orders.length > 0 && <span className="bg-blue-600 text-white px-2 py-0.5 rounded-full text-[11px] font-bold">{orders.length}</span>}</button>
               </div>
 
+              {}
               {showGoogleSheets && (
                 <div className="p-4 sm:p-5 bg-slate-50 border-b border-slate-200 flex flex-col gap-4 animate-fade-in text-[12.7px] font-sans">
                   <div className="flex justify-between items-center border-b border-slate-200 pb-3 font-sans">
@@ -790,6 +989,7 @@
 
               {exportNotice && <div className="bg-sky-50 text-sky-700 px-4 py-2.5 text-center text-[12.7px] font-bold border-b border-sky-200 font-sans">{exportNotice}</div>}
 
+              {}
               {activeTab === 'cost' ? (
                 <div className="p-3 sm:p-5 flex flex-col gap-6 bg-slate-50/60 flex-grow font-sans">
                   {calculatedData.map((sp) => (
@@ -839,11 +1039,10 @@
                               {vendor.items.map((item, itemIdx) => (
                                 <div key={item.id} className="bg-white rounded-2xl shadow-sm border border-slate-300 flex flex-col overflow-hidden transition-all relative">
                                   
-                                  {/* 商品標題列 */}
                                   <div className="bg-slate-100/80 px-4 py-3 border-b border-slate-200 flex justify-between items-center gap-3 flex-wrap relative z-10">
                                     <div className="flex items-center gap-2 flex-grow">
                                       <span className="text-[12px] font-extrabold bg-slate-300/70 px-2 py-0.5 rounded text-slate-700 tracking-wide">▸週邊品項</span>
-                                      <input type="text" placeholder="" value={item.itemTitle} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'itemTitle', e.target.value)} className="rounded-lg px-2.5 py-1.5 font-bold text-[14px] w-full sm:w-64 border border-slate-300 bg-white focus:ring-2 focus:ring-slate-400 outline-none transition-all shadow-sm" />
+                                      <input type="text" value={item.itemTitle} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'itemTitle', e.target.value)} className="rounded-lg px-2.5 py-1.5 font-bold text-[14px] w-full sm:w-64 border border-slate-300 bg-white focus:ring-2 focus:ring-slate-400 outline-none transition-all shadow-sm" />
                                     </div>
                                     <div className="flex items-center gap-2.5 flex-wrap">
                                       <div className="flex items-center gap-0.5 bg-slate-200 p-0.5 rounded-lg border border-slate-300">
@@ -866,7 +1065,6 @@
                                       </div>
                                     )}
 
-                                    {/* 第一區塊：共用設定 (主商品層級) */}
                                     <div className="bg-slate-50/50 p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3.5">
                                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                                         <div><label className="block font-semibold mb-1 text-slate-500 text-[11px] uppercase tracking-wider">品名</label><input type="text" value={item.productName} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'productName', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-medium" /></div>
@@ -886,7 +1084,7 @@
                                         <div className="bg-slate-100 p-2.5 rounded-xl border border-slate-300">
                                           <div className="flex items-center justify-between mb-1">
                                             <label className="font-bold text-slate-700 text-[11.7px]">其他費用</label>
-                                            <input type="text" placeholder="" value={item.otherFeeLabel || ''} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'otherFeeLabel', e.target.value)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-300 bg-white w-[70px] text-right font-normal" />
+                                            <input type="text" value={item.otherFeeLabel || ''} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'otherFeeLabel', e.target.value)} className="text-[10px] px-1.5 py-0.5 rounded border border-slate-300 bg-white w-[70px] text-right font-normal" />
                                           </div>
                                           <input type="text" inputMode="decimal" value={item.otherFee} disabled={sp.isLocked} onChange={(e) => handleItemFieldChange(sp.id, vendor.id, item.id, 'otherFee', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white font-bold" />
                                         </div>
@@ -903,7 +1101,6 @@
                                       </div>
                                     </div>
 
-                                    {/* 第二區塊：多規格與銷量清單 */}
                                     <div className="flex flex-col gap-2">
                                       <div className="flex justify-between items-end mb-1 px-1">
                                         <h4 className="font-bold text-[13px] text-slate-700 flex items-center gap-1.5">
@@ -962,7 +1159,6 @@
                                       </div>
                                     </div>
 
-                                    {/* 第三區塊：本商品總計 (含分攤運費) */}
                                     <div className="bg-white rounded-xl p-3.5 flex flex-col md:flex-row justify-between items-center gap-4 text-slate-800 border border-slate-200 shadow-sm mt-1">
                                       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12.5px] font-medium w-full md:w-auto">
                                         <div className="flex items-center gap-1"><span className="text-slate-500">總印製:</span><span className="text-blue-600 font-bold">{item.itemTotalPrintQty}</span></div>
@@ -992,7 +1188,6 @@
                           </div>
                         ))}
 
-                        {/* 包材 */}
                         {sp.packagings && sp.packagings.map((pkgVendor) => (
                           <div key={pkgVendor.id} className="rounded-2xl shadow-sm overflow-hidden flex flex-col font-sans border border-slate-200" style={{ backgroundColor: theme.packagingBoxBgColor || '#F8FAFC' }}>
                             <div className="px-4 py-3 m-3 mb-0 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 font-sans shadow-sm border border-slate-200/60" style={{ backgroundColor: theme.packagingHeaderBgColor || '#F1F9F3' }}>
@@ -1076,47 +1271,85 @@
                 </div>
               ) : (
                 <div className="p-3 sm:p-5 flex flex-col gap-6 bg-slate-50/60 flex-grow font-sans">
+                  
+                  {/* Dashboard Stats */}
                   <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
                     <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-slate-500 text-[12px] font-semibold">全部訂單</span><span className="text-[18px] font-extrabold text-slate-800 mt-1">{orderStats.totalOrdersCount} 筆</span></div>
                     <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-amber-600 text-[12px] font-semibold">未出貨</span><span className="text-[18px] font-extrabold text-amber-600 mt-1">{orderStats.unshippedCount} 筆</span></div>
                     <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-emerald-600 text-[12px] font-semibold">已出貨</span><span className="text-[18px] font-extrabold text-emerald-600 mt-1">{orderStats.shippedCount} 筆</span></div>
-                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-sky-700 text-[12px] font-semibold">🛍️ 商品總額</span><span className="text-[14px] sm:text-[15px] font-extrabold text-sky-700 mt-1 truncate" title={formatCurrency(orderStats.sumProductTotal)}>{formatCurrency(orderStats.sumProductTotal)}</span></div>
-                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-amber-700 text-[12px] font-semibold">🇺🇸 USD 折合總額</span><span className="text-[14px] sm:text-[15px] font-extrabold text-amber-700 mt-1 truncate" title={formatCurrency(orderStats.sumUSDCond)}>{formatCurrency(orderStats.sumUSDCond)}</span></div>
-                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-indigo-700 text-[12px] font-semibold">💵 總收款金額</span><span className="text-[14px] sm:text-[15px] font-extrabold text-indigo-700 mt-1 truncate" title={formatCurrency(orderStats.sumGrandTotal)}>{formatCurrency(orderStats.sumGrandTotal)}</span></div>
+                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-sky-700 text-[12px] font-semibold">🇹🇼 TWD 商品總額</span><span className="text-[14px] sm:text-[15px] font-extrabold text-sky-700 mt-1 truncate" title={formatCurrency(orderStats.sumProductTWD)}>{formatCurrency(orderStats.sumProductTWD)}</span></div>
+                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-amber-700 text-[12px] font-semibold">🌍 USD 商品總額</span><span className="text-[14px] sm:text-[15px] font-extrabold text-amber-700 mt-1 truncate" title={`US$ ${orderStats.sumProductUSD.toLocaleString()}`}>US$ {orderStats.sumProductUSD.toLocaleString()}</span></div>
+                    <div className="bg-white p-3.5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between"><span className="text-indigo-700 text-[12px] font-semibold">▸總收款金額(TWD)</span><span className="text-[14px] sm:text-[15px] font-extrabold text-indigo-700 mt-1 truncate" title={formatCurrency(orderStats.sumGrandTotal)}>{formatCurrency(orderStats.sumGrandTotal)}</span></div>
                   </div>
 
+                  {/* Order Form Entry */}
                   <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-4 sm:p-6 flex flex-col gap-4">
                     <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-                      <h3 className="text-[16.7px] font-bold text-slate-800 flex items-center gap-2">{editingOrderId ? '✏️ 編輯訂單' : '➕ 新增訂單'}</h3>
+                      <h3 className="text-[16.7px] font-bold text-slate-800 flex items-center gap-2">{editingOrderId ? '▸編輯訂單' : '▸新增訂單'}</h3>
                       {editingOrderId && <button type="button" onClick={handleCancelEditOrder} className="text-xs bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1.5 rounded-lg font-bold">取消編輯</button>}
                     </div>
+                    
                     <form onSubmit={handleSaveOrder} className="flex flex-col gap-4">
+                      {/* Tabs to switch the active isolated draft */}
+                      <div className="flex bg-slate-100 p-1 rounded-xl w-fit mb-1 border border-slate-200/60 shadow-inner">
+                        <button 
+                          type="button" 
+                          onClick={() => handleOrderFormChange('activeType', 'TWD')} 
+                          className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all ${orderForm.activeType === 'TWD' ? 'bg-white shadow text-sky-700 border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+                        >
+                          🇹🇼 台灣訂單 (TWD)
+                        </button>
+                        <button 
+                          type="button" 
+                          onClick={() => handleOrderFormChange('activeType', 'USD')} 
+                          className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all ${orderForm.activeType === 'USD' ? 'bg-white shadow text-amber-700 border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+                        >
+                          🌍 海外訂單 (USD)
+                        </button>
+                      </div>
+
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">訂購日期</label><input type="date" value={orderForm.orderDate} onChange={(e) => handleOrderFormChange('orderDate', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">出貨日期</label><input type="date" value={orderForm.shippingDate} onChange={(e) => handleOrderFormChange('shippingDate', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">訂購日期</label><input type="date" value={activeDraft.orderDate} onChange={(e) => handleOrderFormChange('orderDate', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">出貨日期</label><input type="date" value={activeDraft.shippingDate} onChange={(e) => handleOrderFormChange('shippingDate', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                         <div className="flex items-center pt-5 sm:pt-6">
                           <label className="flex items-center gap-2.5 cursor-pointer select-none bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200 w-full hover:bg-slate-100 transition-colors">
-                            <input type="checkbox" checked={orderForm.shipped} onChange={(e) => handleOrderFormChange('shipped', e.target.checked)} className="w-5 h-5 accent-emerald-600 rounded cursor-pointer" />
+                            <input type="checkbox" checked={activeDraft.shipped} onChange={(e) => handleOrderFormChange('shipped', e.target.checked)} className="w-5 h-5 accent-emerald-600 rounded cursor-pointer" />
                             <span className="font-bold text-slate-700 text-[13.7px]">已出貨</span>
                           </label>
                         </div>
                       </div>
-                      <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">暱稱</label><input type="text" value={orderForm.nickname} onChange={(e) => handleOrderFormChange('nickname', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                      <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">暱稱</label><input type="text" value={activeDraft.nickname} onChange={(e) => handleOrderFormChange('nickname', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                       
+                      {/* Active Draft Items */}
                       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col gap-3">
-                        <div className="flex justify-between items-center"><label className="font-bold text-slate-700 text-[13.7px] flex items-center gap-1.5">📦 購買週邊品項</label><button type="button" onClick={handleAddOrderItem} className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-xl text-[12px] font-bold flex items-center gap-1 shadow-sm"><Icons.Plus /> 新增品項</button></div>
+                        <div className="flex justify-between items-center"><label className="font-bold text-slate-700 text-[13.7px] flex items-center gap-1.5">‖ 購買週邊品項</label><button type="button" onClick={handleAddOrderItem} className="bg-slate-900 hover:bg-slate-800 text-white px-3 py-1.5 rounded-xl text-[12px] font-bold flex items-center gap-1 shadow-sm"><Icons.Plus /> 新增品項</button></div>
                         <div className="flex flex-col gap-2.5">
-                          {orderForm.items.map((item, idx) => {
+                          {activeDraft.items.map((item, idx) => {
                             const subtotal = (parseFloat(item.quantity) || 0) * (parseFloat(item.unitPrice) || 0);
                             return (
-                              <div key={item.id} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                              <div key={item.id} className="flex flex-col lg:flex-row items-stretch lg:items-center gap-2 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                                 <span className="text-[12px] font-bold text-slate-400 w-6">#{idx + 1}</span>
-                                <input type="text" value={item.productName} onChange={(e) => handleOrderItemChange(item.id, 'productName', e.target.value)} className="flex-grow px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" />
+                                <input type="text" value={item.productName} onChange={(e) => handleOrderItemChange(item.id, 'productName', e.target.value)} className="flex-grow px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium text-[13.7px]" />
+                                <input type="text" value={item.style} onChange={(e) => handleOrderItemChange(item.id, 'style', e.target.value)} className="w-full lg:w-32 px-3 py-2 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium text-[13.7px]" />
                                 <div className="flex items-center gap-2 flex-wrap">
-                                  <div className="flex items-center gap-1"><span className="text-[11.7px] text-slate-500">數量:</span><input type="text" inputMode="decimal" value={item.quantity} onChange={(e) => handleOrderItemChange(item.id, 'quantity', e.target.value)} className="w-16 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white outline-none font-bold text-blue-600 text-center" /></div>
-                                  <div className="flex items-center gap-1"><span className="text-[11.7px] text-slate-500">單價:</span><input type="text" inputMode="decimal" value={item.unitPrice} onChange={(e) => handleOrderItemChange(item.id, 'unitPrice', e.target.value)} className="w-20 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white outline-none font-bold text-red-600 text-center" /></div>
-                                  <div className="flex items-center gap-1 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 min-w-[90px] justify-center"><span className="text-[11px] text-slate-500">小計:</span><span className="font-bold text-slate-800">{formatCurrency(subtotal)}</span></div>
-                                  <button type="button" onClick={() => handleDeleteOrderItem(item.id)} disabled={orderForm.items.length <= 1} className="text-slate-400 hover:text-rose-600 p-2 rounded-lg hover:bg-rose-50 disabled:opacity-30 transition-colors"><Icons.Trash /></button>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[11.7px] text-slate-500">數量:</span>
+                                    <input type="text" inputMode="decimal" value={item.quantity} onChange={(e) => handleOrderItemChange(item.id, 'quantity', e.target.value)} className="w-16 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white outline-none font-bold text-blue-600 text-center text-[13.7px]" />
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[11.7px] text-slate-500">單價:</span>
+                                    <div className="relative">
+                                      <span className="absolute left-2.5 top-[7px] text-[12px] text-slate-400 font-bold">{orderForm.activeType === 'USD' ? '$' : 'NT$'}</span>
+                                      <input type="text" inputMode="decimal" value={item.unitPrice} onChange={(e) => handleOrderItemChange(item.id, 'unitPrice', e.target.value)} className="w-24 pl-8 pr-2 py-1.5 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white outline-none font-bold text-red-600 text-right text-[13.7px]" />
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-1 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 min-w-[90px] justify-center">
+                                    <span className="text-[11px] text-slate-500">小計:</span>
+                                    <span className="font-bold text-slate-800">
+                                      {orderForm.activeType === 'USD' ? `US$ ${subtotal.toLocaleString()}` : formatCurrency(subtotal)}
+                                    </span>
+                                  </div>
+                                  <button type="button" onClick={() => handleDeleteOrderItem(item.id)} disabled={activeDraft.items.length <= 1} className="text-slate-400 hover:text-rose-600 p-2 rounded-lg hover:bg-rose-50 disabled:opacity-30 transition-colors"><Icons.Trash /></button>
                                 </div>
                               </div>
                             );
@@ -1124,54 +1357,138 @@
                         </div>
                       </div>
 
-                      <div className="bg-sky-50/40 p-4 rounded-xl border border-sky-100 flex flex-col gap-4">
-                        <h4 className="font-bold text-sky-900 text-[14.7px] flex items-center gap-2">💰 付款金額與自動計算</h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                          <div className="bg-white p-3 rounded-xl border border-sky-200 shadow-sm flex flex-col justify-between"><span className="text-slate-500 text-[11.7px] font-semibold">🇹🇼 台幣商品總額</span><span className="text-[18px] font-extrabold text-red-600 mt-1">{formatCurrency(currentFormTotals.productTotal)}</span></div>
-                          <div className="bg-white p-3 rounded-xl border border-amber-200 shadow-sm flex flex-col justify-between"><label className="text-amber-900 text-[11.7px] font-bold">🇺🇸 售價（USD）</label><input type="text" inputMode="decimal" value={orderForm.paymentUSD} onChange={(e) => handleOrderFormChange('paymentUSD', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-amber-300 bg-white outline-none font-bold text-amber-700 mt-1" /></div>
-                          <div className="bg-white p-3 rounded-xl border border-indigo-200 shadow-sm flex flex-col justify-between">
-                            <div className="flex justify-between items-center text-[11.7px]"><span className="font-bold text-indigo-900">匯率 (與成本試算共用)</span></div>
-                            <div className="flex items-center gap-1 mt-1"><span className="text-slate-600 text-[12px]">1 USD =</span><input type="text" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} className="w-16 px-2 py-1 rounded border border-indigo-300 font-bold text-center bg-white text-[13px]" /><span className="text-slate-600 text-[12px]">TWD</span></div>
-                          </div>
-                          <div className="bg-white p-3 rounded-xl border border-purple-200 shadow-sm flex flex-col justify-between"><label className="text-purple-900 text-[11.7px] font-bold">📦 運費 (TWD)</label><input type="text" inputMode="decimal" value={orderForm.shippingFee} onChange={(e) => handleOrderFormChange('shippingFee', e.target.value)} className="w-full px-2.5 py-1.5 rounded-lg border border-purple-300 bg-white outline-none font-bold text-purple-700 mt-1" /></div>
+                      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                        <div className="bg-slate-50 border-b border-slate-200 px-4 py-3 flex justify-between items-center">
+                          <h4 className="font-bold text-slate-800 text-[15px] flex items-center gap-2">‖ 付款金額與結算</h4>
+                          <span className="text-[11.5px] font-bold bg-white border border-slate-200 text-slate-600 px-2.5 py-1 rounded-lg shadow-sm">
+                            {orderForm.activeType === 'USD' ? '海外訂單 (USD)' : '台灣訂單 (TWD)'}
+                          </span>
                         </div>
-                        <div className="bg-white p-4 rounded-xl border border-sky-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 shadow-inner">
-                          <div className="flex flex-wrap items-center gap-4 text-[13px] text-slate-700">
-                            <div>商品總額: <span className="font-bold text-red-600">{formatCurrency(currentFormTotals.productTotal)}</span></div><div>+</div>
-                            <div>USD折合: <span className="font-bold text-amber-700">{formatCurrency(currentFormTotals.usdConverted)}</span> <span className="text-[11px] text-slate-400">({orderForm.paymentUSD || 0} × {exchangeRate})</span></div><div>+</div>
-                            <div>運費: <span className="font-bold text-purple-700">{formatCurrency(currentFormTotals.shipping)}</span></div>
+
+                        <div className="p-4 sm:p-5 flex flex-col lg:flex-row gap-6">
+                          {/* ▸訂單 */}
+                          <div className="flex-1 flex flex-col gap-4">
+                            <div className="text-[12px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 pb-2">▸訂單<span className="text-[10px] text-slate-400 normal-case ml-1"></span></div>
+                            
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-600 font-medium text-[13px]">商品總額</span>
+                              <span className="font-bold text-slate-700 text-[14px]">
+                                {orderForm.activeType === 'USD' ? 'US$ ' : 'NT$ '}
+                                {currentFormTotals.itemsTotal.toLocaleString()}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-600 font-medium text-[13px] flex items-center gap-1">預收運費</span>
+                              <div className="relative">
+                                <span className="absolute left-3 top-[7px] text-[12.5px] text-slate-500 font-bold">{orderForm.activeType === 'USD' ? 'US$' : 'NT$'}</span>
+                                <input type="text" inputMode="decimal" value={activeDraft.preShippingFee} onChange={(e) => handleOrderFormChange('preShippingFee', e.target.value)} className="w-32 pl-10 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100 font-bold text-slate-800 text-[13.5px] text-right transition-all" />
+                              </div>
+                            </div>
+
+                            {orderForm.activeType === 'USD' && (
+                              <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-100 mt-1">
+                                <span className="text-slate-600 font-medium text-[13px]">系統匯率</span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[12px] text-slate-500 font-bold">1 USD =</span>
+                                  <input type="text" inputMode="decimal" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} className="w-16 px-2 py-1 rounded-md border border-slate-300 bg-white outline-none focus:border-slate-500 font-bold text-center text-slate-800 text-[13px]" />
+                                  <span className="text-[12px] text-slate-500 font-bold">TWD</span>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                          <div className="flex items-center gap-2 bg-slate-900 text-amber-300 px-4 py-2 rounded-xl shadow"><span className="text-[12.7px] font-bold text-white">付款總額：</span><span className="text-[18px] font-extrabold">{formatCurrency(currentFormTotals.totalPayment)}</span></div>
+
+                          <div className="w-px bg-slate-100 hidden lg:block"></div>
+                          <div className="h-px bg-slate-100 lg:hidden my-1"></div>
+
+                          {/* ▸出貨 */}
+                          <div className="flex-1 flex flex-col gap-4">
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                <h5 className="text-[12px] font-bold text-slate-500 uppercase tracking-wider">▸出貨</h5>
+                                <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded"></span>
+                            </div>
+
+                            {orderForm.activeType === 'USD' && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-600 font-medium text-[13px]">預收運費 (折合TWD)</span>
+                                <span className="font-bold text-slate-500 text-[13px]">
+                                  NT$ {currentFormTotals.preShippingTWD.toLocaleString()}
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-600 font-medium text-[13px] flex items-center gap-1">實際運費 (TWD)</span>
+                              <div className="relative">
+                                <span className="absolute left-3 top-[7px] text-[12.5px] text-slate-500 font-bold">NT$</span>
+                                <input type="text" inputMode="decimal" value={activeDraft.shippingFee} onChange={(e) => handleOrderFormChange('shippingFee', e.target.value)} className="w-32 pl-10 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-100 font-bold text-slate-800 text-[13.5px] text-right transition-all" />
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-lg border border-slate-100 mt-auto">
+                              <span className="text-slate-600 font-medium text-[13px]">運費差額</span>
+                              {currentFormTotals.hasActualShipping ? (
+                                  <span className={`text-[14px] font-extrabold tracking-wide ${currentFormTotals.shippingBalance < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                                      {currentFormTotals.shippingBalance < 0 ? '-' : '+'}NT$ {Math.abs(currentFormTotals.shippingBalance).toLocaleString()}
+                                  </span>
+                              ) : (
+                                  <span className="text-[12px] text-slate-400 font-medium">--</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* C. 最終付款總額 */}
+                        <div className="bg-slate-900 px-5 py-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+                           <div className="text-slate-300 text-[13px] font-medium flex items-center gap-2">
+                              <span>客戶實際付款總額</span>
+                              {currentFormTotals.legacyUSD > 0 && orderForm.activeType !== 'USD' && (
+                                <span className="ml-2 text-[10px] text-slate-900 bg-amber-400 px-1.5 py-0.5 rounded font-bold">
+                                  含舊版填寫 US${currentFormTotals.legacyUSD}
+                                </span>
+                              )}
+                           </div>
+                           <div className="flex items-baseline gap-3">
+                              {orderForm.activeType === 'USD' ? (
+                                  <>
+                                      <span className="text-slate-400 text-[13px] font-medium tracking-wider">(折合 NT$ {currentFormTotals.usdConverted.toLocaleString()})</span>
+                                      <span className="text-white text-[24px] font-black tracking-tight">US$ {currentFormTotals.totalPayment.toLocaleString()}</span>
+                                  </>
+                              ) : (
+                                  <span className="text-white text-[24px] font-black tracking-tight">NT$ {currentFormTotals.totalPayment.toLocaleString()}</span>
+                              )}
+                           </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">收件人</label><input type="text" value={orderForm.recipient} onChange={(e) => handleOrderFormChange('recipient', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">電話</label><input type="text" value={orderForm.phone} onChange={(e) => handleOrderFormChange('phone', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">收件人</label><input type="text" value={activeDraft.recipient} onChange={(e) => handleOrderFormChange('recipient', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">電話</label><input type="text" value={activeDraft.phone} onChange={(e) => handleOrderFormChange('phone', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">國家</label><input type="text" value={orderForm.country} onChange={(e) => handleOrderFormChange('country', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">地區</label><input type="text" value={orderForm.region} onChange={(e) => handleOrderFormChange('region', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">地址</label><input type="text" value={orderForm.address} onChange={(e) => handleOrderFormChange('address', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">國家</label><input type="text" value={activeDraft.country} onChange={(e) => handleOrderFormChange('country', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">地區</label><input type="text" value={activeDraft.region} onChange={(e) => handleOrderFormChange('region', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">地址</label><input type="text" value={activeDraft.address} onChange={(e) => handleOrderFormChange('address', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                       </div>
-                      <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">備註</label><textarea rows="2" value={orderForm.notes} onChange={(e) => handleOrderFormChange('notes', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium"></textarea></div>
+                      <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">備註</label><textarea rows="2" value={activeDraft.notes} onChange={(e) => handleOrderFormChange('notes', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium"></textarea></div>
 
-                      <div className="flex justify-end gap-2 pt-2">
+                      <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                         {editingOrderId && <button type="button" onClick={handleCancelEditOrder} className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-5 py-2.5 rounded-xl font-bold transition-all shadow-sm">取消編輯</button>}
                         <button type="submit" className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-xl font-bold transition-all shadow-md flex items-center gap-2"><Icons.Plus /> {editingOrderId ? '儲存修改' : '新增訂單'}</button>
                       </div>
                     </form>
                   </div>
 
+                  {}
                   <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-4 sm:p-6 flex flex-col gap-4">
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-200 pb-4">
                       <h3 className="text-[16.7px] font-bold text-slate-800 flex items-center gap-2">📋 訂單列表 ({filteredOrders.length})</h3>
                       <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
-                        <div className="relative flex-grow sm:flex-grow-0"><input type="text" value={orderSearchQuery} onChange={(e) => setOrderSearchQuery(e.target.value)} className="px-3.5 py-1.5 rounded-xl border border-slate-300 text-[12.7px] bg-slate-50 focus:bg-white outline-none w-full sm:w-64" /></div>
+                        <div className="relative flex-grow sm:flex-grow-0"><input type="text" placeholder="搜尋姓名、暱稱、商品..." value={orderSearchQuery} onChange={(e) => setOrderSearchQuery(e.target.value)} className="px-3.5 py-1.5 rounded-xl border border-slate-300 text-[12.7px] bg-slate-50 focus:bg-white outline-none w-full sm:w-64" /></div>
                         <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
                           <button onClick={() => setOrderStatusFilter('all')} className={`px-3 py-1 rounded-lg font-bold text-[12px] transition-all ${orderStatusFilter === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`}>全部</button>
-                          <button onClick={() => setOrderStatusFilter('unshipped')} className={`px-3 py-1 rounded-lg font-bold text-[12px] transition-all ${orderStatusFilter === 'unshipped' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`}>未出貨</button>
-                          <button onClick={() => setOrderStatusFilter('shipped')} className={`px-3 py-1 rounded-lg font-bold text-[12px] transition-all ${orderStatusFilter === 'shipped' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`}>已出貨</button>
+                          <button onClick={() => setOrderStatusFilter('unshipped')} className={`px-3 py-1 rounded-lg font-bold text-[12px] transition-all ${orderStatusFilter === 'unshipped' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`}>未出</button>
+                          <button onClick={() => setOrderStatusFilter('shipped')} className={`px-3 py-1 rounded-lg font-bold text-[12px] transition-all ${orderStatusFilter === 'shipped' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-200'}`}>已出</button>
                         </div>
                       </div>
                     </div>
@@ -1181,38 +1498,133 @@
                       <>
                         <div className="hidden md:block overflow-x-auto">
                           <table className="w-full text-left border-collapse text-[13px]">
-                            <thead><tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-bold"><th className="p-3">訂購日期</th><th className="p-3">暱稱</th><th className="p-3">購買品項與小計</th><th className="p-3 text-right">付款明細</th><th className="p-3">收件人</th><th className="p-3">出貨日期</th><th className="p-3 text-center">狀態</th><th className="p-3 text-center">操作</th></tr></thead>
+                            <thead>
+                              <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-bold">
+                                <th className="p-3">訂購資訊</th>
+                                <th className="p-3">購買品項與小計</th>
+                                <th className="p-3 text-right w-52">付款明細</th>
+                                <th className="p-3 w-40">收件資訊</th>
+                                <th className="p-3 text-center">狀態</th>
+                                <th className="p-3 text-center w-24">操作</th>
+                              </tr>
+                            </thead>
                             <tbody className="divide-y divide-slate-100 font-medium">
                               {filteredOrders.map((order) => {
                                 const globalRate = parseFloat(exchangeRate) || 0;
-                                const pTotal = (order.items || []).reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0)), 0);
-                                const uVal = parseFloat(order.paymentUSD) || 0; const uCond = Math.round(uVal * globalRate); const sVal = parseFloat(order.shippingFee) || 0;
-                                const grandTotal = pTotal + uCond + sVal;
+                                const itemsSum = (order.items || []).reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0)), 0);
+                                
+                                let uVal = 0;
+                                let uCond = 0;
+                                let preShippingTWD = 0;
+                                let shippingBalance = 0;
+                                let grandTotal = 0;
+
+                                const preSVal = parseFloat(order.preShippingFee) || 0;
+                                const hasActualShipping = order.shippingFee !== undefined && order.shippingFee !== '';
+                                const actualSVal = parseFloat(order.shippingFee) || 0;
+
+                                if (order.orderType === 'USD') {
+                                    uVal = itemsSum;
+                                    const totalUSD = itemsSum + preSVal; // 預收為 USD
+                                    uCond = Math.round(totalUSD * globalRate);
+                                    preShippingTWD = Math.round(preSVal * globalRate);
+
+                                    if (hasActualShipping) {
+                                        shippingBalance = preShippingTWD - actualSVal;
+                                    }
+                                    grandTotal = uCond;
+                                } else {
+                                    preShippingTWD = preSVal;
+                                    if (hasActualShipping) {
+                                        shippingBalance = preShippingTWD - actualSVal;
+                                    }
+                                    grandTotal = itemsSum + preShippingTWD;
+                                }
+
+                                const oldUsd = parseFloat(order.paymentUSD) || 0;
+                                if (oldUsd > 0 && order.orderType !== 'USD') {
+                                    uVal += oldUsd;
+                                    uCond += Math.round(oldUsd * globalRate);
+                                    grandTotal += Math.round(oldUsd * globalRate);
+                                }
+
                                 return (
                                   <tr key={order.id} className="hover:bg-slate-50/70 transition-colors">
-                                    <td className="p-3 text-slate-500 text-[12px] whitespace-nowrap">{order.orderDate || '-'}</td>
-                                    <td className="p-3 font-bold text-slate-800">{order.nickname || '-'}</td>
-                                    <td className="p-3">
+                                    <td className="p-3 align-top">
                                       <div className="flex flex-col gap-1">
-                                        {Array.isArray(order.items) && order.items.map((it, idx) => (
-                                          <div key={idx} className="text-slate-900 font-semibold flex items-center gap-2"><span>• {it.productName || '(未命名)'} × {it.quantity || 1}</span><span className="text-red-600 font-bold">{formatCurrency((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0))}</span></div>
-                                        ))}
-                                      </div>
-                                      {order.notes && <div className="text-[11px] text-slate-400 mt-1 truncate max-w-xs">備註: {order.notes}</div>}
-                                    </td>
-                                    <td className="p-3 text-right">
-                                      <div className="flex flex-col gap-0.5 text-[12px]">
-                                        <div>商品: <span className="font-bold text-red-600">{formatCurrency(pTotal)}</span></div>
-                                        {uVal > 0 && <div>USD: <span className="font-bold text-amber-700">US${uVal.toLocaleString()} (折合 {formatCurrency(uCond)})</span></div>}
-                                        {sVal > 0 && <div>運費: <span className="font-bold text-purple-700">{formatCurrency(sVal)}</span></div>}
-                                        <div className="border-t border-slate-200 pt-1 mt-0.5 font-extrabold text-slate-900 text-[13px]">總計: {formatCurrency(grandTotal)}</div>
+                                        <div className="font-bold text-slate-800 text-[14px]">{order.nickname || '-'}</div>
+                                        <div className="text-slate-500 text-[11px] whitespace-nowrap">{order.orderDate || '-'}</div>
+                                        <div className="mt-1">
+                                          {order.orderType === 'USD' 
+                                            ? <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold">🌍 海外訂單 (USD)</span>
+                                            : <span className="bg-sky-100 text-sky-700 px-2 py-0.5 rounded text-[10px] font-bold">🇹🇼 台灣訂單 (TWD)</span>
+                                          }
+                                        </div>
                                       </div>
                                     </td>
-                                    <td className="p-3"><div className="font-bold">{order.recipient || '-'}</div><div className="text-[11px] text-slate-500">{order.phone || '-'}</div>{(order.country || order.region) && <div className="text-[10px] text-slate-400 truncate max-w-[120px]">{order.country} {order.region}</div>}</td>
-                                    <td className="p-3 text-slate-500 text-[12px] whitespace-nowrap">{order.shippingDate || '未設定'}</td>
-                                    <td className="p-3 text-center">{order.shipped ? <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full text-[11px] font-bold">已出貨</span> : <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full text-[11px] font-bold">未出貨</span>}</td>
-                                    <td className="p-3 text-center whitespace-nowrap">
-                                      <div className="flex items-center justify-center gap-1.5"><button onClick={() => handleEditOrder(order)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1 rounded-lg font-bold text-[11.7px]">編輯</button><button onClick={() => handleDeleteOrder(order.id)} className="bg-rose-50 hover:bg-rose-100 text-rose-600 px-2.5 py-1 rounded-lg font-bold text-[11.7px]">刪除</button></div>
+                                    <td className="p-3 align-top">
+                                      <div className="flex flex-col gap-1.5">
+                                        {Array.isArray(order.items) && order.items.map((it, idx) => {
+                                          const subtotal = (parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0);
+                                          const symbol = order.orderType === 'USD' ? 'US$' : '';
+                                          const displayName = it.productName || '(未命名)';
+                                          const styleSuffix = it.style ? ` - ${it.style}` : '';
+                                          return (
+                                            <div key={idx} className="text-slate-800 font-semibold flex items-center justify-between gap-2 text-[12px] bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                                              <span className="truncate">▪ {displayName}{styleSuffix}</span>
+                                              <span className="whitespace-nowrap ml-2"><span className="text-slate-400 font-normal mr-1">{it.quantity || 1} × {symbol}{it.unitPrice}</span> <span className="text-red-600 font-bold ml-1">{order.orderType === 'USD' ? `US$ ${subtotal.toLocaleString()}` : formatCurrency(subtotal)}</span></span>
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                      {order.notes && <div className="text-[11.5px] text-amber-700 bg-amber-50 p-1.5 rounded mt-2 border border-amber-100">備註: {order.notes}</div>}
+                                    </td>
+                                    <td className="p-3 text-right align-top">
+                                      <div className="flex flex-col gap-1 text-[12.5px] h-full justify-center">
+                                        {order.orderType === 'USD' ? (
+                                          <>
+                                            <div className="flex justify-between"><span>商品總計(USD):</span> <span className="font-bold text-amber-700">US${(uVal + preSVal).toLocaleString()}</span></div>
+                                            <div className="flex justify-between text-[11px] text-slate-500"><span>(含預收 折合TWD):</span> <span>{formatCurrency(uCond)}</span></div>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <div className="flex justify-between"><span>商品總額:</span> <span className="font-bold text-sky-700">{formatCurrency(itemsSum)}</span></div>
+                                            {preSVal !== 0 && <div className="flex justify-between mt-0.5"><span>預收運費:</span> <span className="font-bold text-indigo-700">{formatCurrency(preSVal)}</span></div>}
+                                          </>
+                                        )}
+                                        
+                                        {hasActualShipping && (
+                                            <>
+                                              <div className="flex justify-between mt-0.5"><span>實際運費:</span> <span className="font-bold text-slate-700">{formatCurrency(actualSVal)}</span></div>
+                                              <div className="flex justify-between mt-0.5 text-[11px]">
+                                                <span className="text-slate-500">運費差額:</span> 
+                                                <span className={`font-bold ${shippingBalance < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                                                  {shippingBalance < 0 ? '-' : ''}{formatCurrency(Math.abs(shippingBalance))}
+                                                </span>
+                                              </div>
+                                            </>
+                                        )}
+                                        <div className="border-t border-slate-200 pt-1.5 mt-1 font-extrabold text-slate-900 text-[14px] flex justify-between"><span>付款總額:</span> <span>{formatCurrency(grandTotal)}</span></div>
+                                      </div>
+                                    </td>
+                                    <td className="p-3 align-top">
+                                      <div className="flex flex-col gap-0.5">
+                                        <div className="font-bold text-slate-800">{order.recipient || '-'}</div>
+                                        <div className="text-[11px] text-slate-500">{order.phone || '-'}</div>
+                                        {(order.country || order.region) && <div className="text-[11px] text-slate-500 truncate max-w-[120px] mt-1 bg-slate-100 px-1.5 py-0.5 rounded w-fit">{order.country} {order.region}</div>}
+                                      </div>
+                                    </td>
+                                    <td className="p-3 text-center align-top">
+                                      <div className="flex flex-col items-center gap-1">
+                                        {order.shipped ? <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-full text-[11px] font-bold">已出貨</span> : <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full text-[11px] font-bold border border-slate-200">未出貨</span>}
+                                        <div className="text-[10px] text-slate-400 mt-1">{order.shippingDate}</div>
+                                      </div>
+                                    </td>
+                                    <td className="p-3 text-center align-top">
+                                      <div className="flex flex-col gap-1.5">
+                                        <button onClick={() => handleEditOrder(order)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-1 rounded font-bold text-[11.5px] border border-slate-300 w-full transition-colors">編輯</button>
+                                        <button onClick={() => handleDeleteOrder(order.id)} className="bg-white hover:bg-rose-50 text-rose-500 py-1 rounded font-bold text-[11.5px] border border-rose-200 w-full transition-colors">刪除</button>
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -1220,25 +1632,117 @@
                             </tbody>
                           </table>
                         </div>
+                        {/* Mobile View */}
                         <div className="md:hidden flex flex-col gap-3">
                           {filteredOrders.map((order) => {
                             const globalRate = parseFloat(exchangeRate) || 0;
-                            const pTotal = (order.items || []).reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0)), 0);
-                            const uVal = parseFloat(order.paymentUSD) || 0; const uCond = Math.round(uVal * globalRate); const sVal = parseFloat(order.shippingFee) || 0;
-                            const grandTotal = pTotal + uCond + sVal;
+                            const itemsSum = (order.items || []).reduce((acc, it) => acc + ((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0)), 0);
+                            
+                            let uVal = 0;
+                            let uCond = 0;
+                            let preShippingTWD = 0;
+                            let shippingBalance = 0;
+                            let grandTotal = 0;
+
+                            const preSVal = parseFloat(order.preShippingFee) || 0;
+                            const hasActualShipping = order.shippingFee !== undefined && order.shippingFee !== '';
+                            const actualSVal = parseFloat(order.shippingFee) || 0;
+
+                            if (order.orderType === 'USD') {
+                                uVal = itemsSum;
+                                const totalUSD = itemsSum + preSVal; // 預收為 USD
+                                uCond = Math.round(totalUSD * globalRate);
+                                preShippingTWD = Math.round(preSVal * globalRate);
+
+                                if (hasActualShipping) {
+                                    shippingBalance = preShippingTWD - actualSVal;
+                                }
+                                grandTotal = uCond;
+                            } else {
+                                preShippingTWD = preSVal;
+                                if (hasActualShipping) {
+                                    shippingBalance = preShippingTWD - actualSVal;
+                                }
+                                grandTotal = itemsSum + preShippingTWD;
+                            }
+
+                            const oldUsd = parseFloat(order.paymentUSD) || 0;
+                            if (oldUsd > 0 && order.orderType !== 'USD') {
+                                uVal += oldUsd;
+                                uCond += Math.round(oldUsd * globalRate);
+                                grandTotal += Math.round(oldUsd * globalRate);
+                            }
+
                             return (
                               <div key={order.id} className="bg-slate-50/80 rounded-xl p-4 border border-slate-200 flex flex-col gap-3 shadow-sm">
-                                <div className="flex justify-between items-start border-b border-slate-200 pb-2"><div><span className="font-extrabold text-[14.7px] text-slate-900">{order.nickname || '無暱稱'}</span><span className="text-slate-400 text-[11px] ml-2">{order.orderDate}</span></div>{order.shipped ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-[11px] font-bold">已出貨</span> : <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[11px] font-bold">未出貨</span>}</div>
-                                <div className="flex flex-col gap-1 text-[13px]"><span className="text-slate-500 font-semibold">購買品項：</span><div className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-col gap-1.5">
-                                  {Array.isArray(order.items) && order.items.map((it, idx) => (
-                                    <div key={idx} className="font-bold text-slate-900 flex justify-between items-center text-[12.5px]"><span>• {it.productName || '(未命名)'} ({it.quantity || 1} × {formatCurrency(it.unitPrice)})</span><span className="text-red-600">{formatCurrency((parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0))}</span></div>
-                                  ))}
-                                </div></div>
-                                <div className="flex flex-col gap-1 text-[13px] bg-white p-2.5 rounded-xl border border-slate-200"><span className="text-slate-500 font-semibold text-[11px]">付款總額明細：</span><div className="flex justify-between"><span>商品總額</span><span className="font-bold text-red-600">{formatCurrency(pTotal)}</span></div>{uVal > 0 && <div className="flex justify-between"><span>USD 售價 (折合)</span><span className="font-bold text-amber-700">US${uVal} ({formatCurrency(uCond)})</span></div>}{sVal > 0 && <div className="flex justify-between"><span>運費</span><span className="font-bold text-purple-700">{formatCurrency(sVal)}</span></div>}<div className="border-t border-slate-100 pt-1 mt-1 font-extrabold text-slate-900 flex justify-between text-[14px]"><span>付款總額</span><span className="text-indigo-700">{formatCurrency(grandTotal)}</span></div></div>
-                                <div className="grid grid-cols-2 gap-2 text-[13px]"><div><span className="text-slate-500">收件人：</span><span className="font-semibold">{order.recipient || '-'} ({order.phone || '-'})</span></div><div><span className="text-slate-500">出貨日期：</span><span className="font-semibold">{order.shippingDate || '未出貨'}</span></div></div>
-                                {(order.country || order.region || order.address) && <div className="text-[12px] bg-white p-2.5 rounded-xl border border-slate-200 flex flex-col gap-1">{order.country && <div className="text-slate-700">🌍 {order.country}</div>}{order.region && <div className="text-slate-700">📍 {order.region}</div>}{order.address && <div className="text-slate-700">🏠 {order.address}</div>}</div>}
-                                {order.notes && <div className="text-[12px] bg-amber-50/50 p-2 rounded-lg border border-amber-100 text-amber-900"><span className="font-bold">備註：</span> {order.notes}</div>}
-                                <div className="flex justify-end gap-2 pt-1 border-t border-slate-200"><button onClick={() => handleEditOrder(order)} className="bg-white hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg font-bold text-[12px] border border-slate-300">編輯</button><button onClick={() => handleDeleteOrder(order.id)} className="bg-rose-500 hover:bg-rose-600 text-white px-3.5 py-1.5 rounded-lg font-bold text-[12px]">刪除</button></div>
+                                <div className="flex justify-between items-start border-b border-slate-200 pb-2">
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-extrabold text-[14.7px] text-slate-900">{order.nickname || '無暱稱'}</span>
+                                      {order.orderType === 'USD' 
+                                        ? <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded text-[10px] font-bold">USD</span>
+                                        : <span className="bg-sky-100 text-sky-700 px-1.5 py-0.5 rounded text-[10px] font-bold">TWD</span>
+                                      }
+                                    </div>
+                                    <span className="text-slate-400 text-[11px] block mt-0.5">{order.orderDate}</span>
+                                  </div>
+                                  {order.shipped ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-[11px] font-bold">已出貨</span> : <span className="bg-white border border-slate-300 text-slate-500 px-2 py-0.5 rounded-full text-[11px] font-bold">未出貨</span>}
+                                </div>
+                                <div className="flex flex-col gap-1 text-[13px]">
+                                  <span className="text-slate-500 font-semibold text-[11px]">購買品項：</span>
+                                  <div className="bg-white p-2.5 rounded-xl border border-slate-200 flex flex-col gap-1.5">
+                                    {Array.isArray(order.items) && order.items.map((it, idx) => {
+                                      const subtotal = (parseFloat(it.quantity) || 0) * (parseFloat(it.unitPrice) || 0);
+                                      const symbol = order.orderType === 'USD' ? 'US$' : '';
+                                      const displayName = it.productName || '(未命名)';
+                                      const styleSuffix = it.style ? ` - ${it.style}` : '';
+                                      return (
+                                        <div key={idx} className="font-bold text-slate-800 flex justify-between items-center text-[12px] border-b border-slate-50 last:border-0 pb-1 last:pb-0">
+                                          <span>• {displayName}{styleSuffix} <span className="text-slate-400 ml-1 font-normal">({it.quantity || 1} × {symbol}{it.unitPrice})</span></span>
+                                          <span className="text-red-600">{order.orderType === 'USD' ? `US$ ${subtotal.toLocaleString()}` : formatCurrency(subtotal)}</span>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                </div>
+                                <div className="flex flex-col gap-1 text-[13px] bg-white p-3 rounded-xl border border-slate-200 shadow-inner">
+                                  <span className="text-slate-500 font-semibold text-[11px] mb-1">付款總額明細：</span>
+                                  {order.orderType === 'USD' ? (
+                                    <>
+                                      <div className="flex justify-between items-center"><span>商品總額 (USD)</span><span className="font-bold text-amber-700">US${uVal.toLocaleString()}</span></div>
+                                      {preSVal > 0 && <div className="flex justify-between items-center"><span>預收運費 (USD)</span><span className="font-bold text-indigo-700">US${preSVal.toLocaleString()}</span></div>}
+                                      <div className="flex justify-between items-center text-[11px] text-slate-500 mt-0.5"><span>折合台幣 (TWD)</span><span>{formatCurrency(uCond)}</span></div>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="flex justify-between items-center"><span>商品總額 (TWD)</span><span className="font-bold text-sky-700">{formatCurrency(itemsSum)}</span></div>
+                                      {preSVal !== 0 && <div className="flex justify-between items-center mt-1"><span>預收運費 (TWD)</span><span className="font-bold text-indigo-700">{formatCurrency(preSVal)}</span></div>}
+                                    </>
+                                  )}
+                                  
+                                  {hasActualShipping && (
+                                    <>
+                                      <div className="flex justify-between items-center mt-1"><span>實際運費 (TWD)</span><span className="font-bold text-slate-700">{formatCurrency(actualSVal)}</span></div>
+                                      <div className="flex justify-between items-center mt-1 text-[11.5px] bg-slate-50 px-2 py-1 rounded">
+                                        <span className="text-slate-600 font-bold">運費差額</span>
+                                        <span className={`font-bold ${shippingBalance < 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                                          {shippingBalance < 0 ? '-' : ''}{formatCurrency(Math.abs(shippingBalance))}
+                                        </span>
+                                      </div>
+                                    </>
+                                  )}
+                                  <div className="border-t border-slate-100 pt-2 mt-1.5 font-extrabold text-slate-900 flex justify-between items-center text-[15px]"><span>付款總額</span><span className="text-slate-900 bg-slate-200 px-2 py-0.5 rounded-lg">{formatCurrency(grandTotal)}</span></div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 text-[12px] bg-slate-100 p-2.5 rounded-lg">
+                                  <div><span className="text-slate-500 block mb-0.5">收件人</span><span className="font-bold text-slate-800">{order.recipient || '-'}</span><div className="text-[10.5px] text-slate-500 mt-0.5">{order.phone || '-'}</div></div>
+                                  <div><span className="text-slate-500 block mb-0.5">出貨日期</span><span className="font-bold text-slate-800">{order.shippingDate || '未設定'}</span></div>
+                                </div>
+                                {(order.country || order.region || order.address) && <div className="text-[11.5px] bg-white p-2.5 rounded-lg border border-slate-200 flex flex-col gap-1">{order.country && <div className="text-slate-700">🌍 {order.country}</div>}{order.region && <div className="text-slate-700">📍 {order.region}</div>}{order.address && <div className="text-slate-700">🏠 {order.address}</div>}</div>}
+                                {order.notes && <div className="text-[12px] bg-amber-50/50 p-2.5 rounded-lg border border-amber-100 text-amber-900 leading-relaxed"><span className="font-bold text-amber-700">備註：</span> {order.notes}</div>}
+                                <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 mt-1">
+                                  <button onClick={() => handleEditOrder(order)} className="bg-white hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-[12.5px] border border-slate-300 transition-colors">編輯</button>
+                                  <button onClick={() => handleDeleteOrder(order.id)} className="bg-white hover:bg-rose-50 border border-rose-200 text-rose-600 px-4 py-2 rounded-lg font-bold text-[12.5px] transition-colors">刪除</button>
+                                </div>
                               </div>
                             );
                           })}
