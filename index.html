@@ -151,6 +151,7 @@
             phone: o.phone || '',
             country: o.country || '',
             region: o.region || '',
+            zipCode: o.zipCode || '', // 新增郵遞區號
             address: o.address || '',
             notes: o.notes || ''
           };
@@ -241,6 +242,7 @@
           phone: '', 
           country: '', 
           region: '', 
+          zipCode: '', // 新增郵遞區號
           address: '', 
           notes: ''
         });
@@ -273,6 +275,7 @@
                 setUser(currentUser);
                 if (currentUser) {
                   setSyncStatus('Syncing...');
+                  isRemoteLoading.current = true;
                   try {
                     const userDocRef = doc(db, 'users', currentUser.uid);
                     const docSnap = await getDoc(userDocRef);
@@ -292,6 +295,8 @@
                   } catch (err) {
                     console.error("Cloud config load failed", err);
                     setSyncStatus('Sync failed');
+                  } finally {
+                    setTimeout(() => { isRemoteLoading.current = false; }, 1000);
                   }
                 } else {
                   setSyncStatus('Offline');
@@ -303,6 +308,32 @@
           else window.addEventListener('firebase-ready', checkFirebaseReady);
           return () => window.removeEventListener('firebase-ready', checkFirebaseReady);
         }, []);
+
+        // 新增：自動存檔至雲端機制
+        useEffect(() => {
+          if (!user || !window.firebaseService || isRemoteLoading.current) return;
+          
+          const { db, doc, setDoc } = window.firebaseService;
+          const autoSaveTimer = setTimeout(async () => {
+            try {
+              setSyncStatus('Syncing...');
+              await setDoc(doc(db, 'users', user.uid), {
+                currentDocId,
+                currentDocTitle,
+                salesPeriods,
+                exchangeRate,
+                orders,
+                lastAutoSaved: new Date().toISOString()
+              }, { merge: true });
+              setSyncStatus('Synced');
+            } catch (err) {
+              console.error("Auto-save failed", err);
+              setSyncStatus('Sync failed');
+            }
+          }, 1500); // 停止動作 1.5 秒後自動儲存
+
+          return () => clearTimeout(autoSaveTimer);
+        }, [salesPeriods, exchangeRate, orders, currentDocId, currentDocTitle, user]);
 
         const handleGoogleLogin = async () => {
           if (!window.firebaseService) return;
@@ -369,7 +400,7 @@
                 if (ver.payload.theme) setTheme(ver.payload.theme);
                 if (ver.payload.orders) setOrders(sanitizeOrders(ver.payload.orders));
               }
-              setTimeout(() => { isRemoteLoading.current = false; }, 300);
+              setTimeout(() => { isRemoteLoading.current = false; }, 1000);
               setExportNotice(`已成功從 Google 試算表讀取：${ver.title}`);
               setTimeout(() => setExportNotice(''), 4000);
           });
@@ -621,6 +652,7 @@
             phone: order.phone || '', 
             country: order.country || '', 
             region: order.region || '', 
+            zipCode: order.zipCode || '', // 新增郵遞區號
             address: order.address || '', 
             notes: order.notes || ''
           };
@@ -1479,8 +1511,9 @@
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">國家</label><input type="text" value={activeDraft.country} onChange={(e) => handleOrderFormChange('country', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                         <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">地區</label><input type="text" value={activeDraft.region} onChange={(e) => handleOrderFormChange('region', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">地址</label><input type="text" value={activeDraft.address} onChange={(e) => handleOrderFormChange('address', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">郵遞區號</label><input type="text" value={activeDraft.zipCode} onChange={(e) => handleOrderFormChange('zipCode', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                       </div>
+                      <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">地址</label><input type="text" value={activeDraft.address} onChange={(e) => handleOrderFormChange('address', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                       <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">備註</label><textarea rows="2" value={activeDraft.notes} onChange={(e) => handleOrderFormChange('notes', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium"></textarea></div>
 
                       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -1624,7 +1657,8 @@
                                         <div className="font-bold text-slate-800">{order.recipient || '-'}</div>
                                         <div className="text-[11px] text-slate-500">{order.phone || '-'}</div>
                                         {order.email && <div className="text-[11px] text-slate-500 truncate max-w-[140px]" title={order.email}>{order.email}</div>}
-                                        {(order.country || order.region) && <div className="text-[11px] text-slate-500 truncate max-w-[120px] mt-1 bg-slate-100 px-1.5 py-0.5 rounded w-fit">{order.country} {order.region}</div>}
+                                        {(order.country || order.region || order.zipCode) && <div className="text-[11px] text-slate-500 truncate max-w-[140px] mt-1 bg-slate-100 px-1.5 py-0.5 rounded w-fit">{order.country} {order.zipCode} {order.region}</div>}
+                                        {order.address && <div className="text-[11px] text-slate-600 mt-0.5 truncate max-w-[140px]" title={order.address}>{order.address}</div>}
                                       </div>
                                     </td>
                                     <td className="p-3 text-center align-top">
@@ -1751,7 +1785,12 @@
                                   <div><span className="text-slate-500 block mb-0.5">收件人</span><span className="font-bold text-slate-800">{order.recipient || '-'}</span><div className="text-[10.5px] text-slate-500 mt-0.5">{order.phone || '-'}</div>{order.email && <div className="text-[10.5px] text-slate-500 mt-0.5 truncate">{order.email}</div>}</div>
                                   <div><span className="text-slate-500 block mb-0.5">出貨日期</span><span className="font-bold text-slate-800">{order.shippingDate || '未設定'}</span></div>
                                 </div>
-                                {(order.country || order.region || order.address) && <div className="text-[11.5px] bg-white p-2.5 rounded-lg border border-slate-200 flex flex-col gap-1">{order.country && <div className="text-slate-700">🌍 {order.country}</div>}{order.region && <div className="text-slate-700">📍 {order.region}</div>}{order.address && <div className="text-slate-700">🏠 {order.address}</div>}</div>}
+                                {(order.country || order.region || order.zipCode || order.address) && (
+                                  <div className="text-[11.5px] bg-white p-2.5 rounded-lg border border-slate-200 flex flex-col gap-1">
+                                    {(order.country || order.region || order.zipCode) && <div className="text-slate-700">🌍 {order.country} {order.zipCode} {order.region}</div>}
+                                    {order.address && <div className="text-slate-700">🏠 {order.address}</div>}
+                                  </div>
+                                )}
                                 {order.notes && <div className="text-[12px] bg-amber-50/50 p-2.5 rounded-lg border border-amber-100 text-amber-900 leading-relaxed"><span className="font-bold text-amber-700">備註：</span> {order.notes}</div>}
                                 <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 mt-1">
                                   <button onClick={() => handleEditOrder(order)} className="bg-white hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-[12.5px] border border-slate-300 transition-colors">編輯</button>
