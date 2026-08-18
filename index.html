@@ -137,7 +137,7 @@
           return {
             id: o.id || 'order_' + Date.now() + Math.random(),
             orderType: o.orderType || (legacyHasUSD ? 'USD' : 'TWD'),
-            orderNumber: o.orderNumber || '',
+            orderNumber: o.orderNumber || '', // 加入訂單編號
             orderDate: o.orderDate || new Date().toISOString().split('T')[0],
             shippingDate: o.shippingDate || '',
             shipped: !!o.shipped,
@@ -150,11 +150,11 @@
             recipient: o.recipient || '',
             phone: o.phone || '',
             country: o.country || '',
-            state: o.state || o.region || '',
+            state: o.state || o.region || '', // 州／省 (相容舊版 region)
             city: o.city || '',
-            zipCode: o.zipCode || '',
-            address1: o.address1 || o.address || '',
-            address2: o.address2 || '',
+            zipCode: o.zipCode || '', // 新增郵遞區號
+            address1: o.address1 || o.address || '', // 收件地址1 (相容舊版 address)
+            address2: o.address2 || '', // 收件地址2
             notes: o.notes || ''
           };
         });
@@ -245,14 +245,14 @@
           country: '', 
           state: '', 
           city: '',
-          zipCode: '',
+          zipCode: '', // 新增郵遞區號
           address1: '', 
           address2: '', 
           notes: ''
         });
 
         const [orderForm, setOrderForm] = useState({
-          activeType: 'TWD',
+          activeType: 'USD', // 預設改為海外訂單
           TWD: generateDefaultDraft(),
           USD: generateDefaultDraft()
         });
@@ -624,7 +624,7 @@
           setTimeout(() => setExportNotice(''), 3000);
           
           setOrderForm({
-            activeType: 'TWD',
+            activeType: 'USD', // 儲存後也預設回到海外訂單
             TWD: generateDefaultDraft(),
             USD: generateDefaultDraft()
           });
@@ -674,7 +674,7 @@
         const handleCancelEditOrder = () => {
           setEditingOrderId(null);
           setOrderForm({
-            activeType: 'TWD',
+            activeType: 'USD', // 取消編輯後預設回到海外訂單
             TWD: generateDefaultDraft(),
             USD: generateDefaultDraft()
           });
@@ -1338,17 +1338,17 @@
                       <div className="flex bg-slate-100 p-1 rounded-xl w-fit mb-1 border border-slate-200/60 shadow-inner">
                         <button 
                           type="button" 
-                          onClick={() => handleOrderFormChange('activeType', 'TWD')} 
-                          className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all ${orderForm.activeType === 'TWD' ? 'bg-white shadow text-sky-700 border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
-                        >
-                          🇹🇼 台灣訂單 (TWD)
-                        </button>
-                        <button 
-                          type="button" 
                           onClick={() => handleOrderFormChange('activeType', 'USD')} 
                           className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all ${orderForm.activeType === 'USD' ? 'bg-white shadow text-amber-700 border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
                         >
                           🌍 海外訂單 (USD)
+                        </button>
+                        <button 
+                          type="button" 
+                          onClick={() => handleOrderFormChange('activeType', 'TWD')} 
+                          className={`px-5 py-2 rounded-lg text-[13px] font-bold transition-all ${orderForm.activeType === 'TWD' ? 'bg-white shadow text-sky-700 border border-slate-200/50' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+                        >
+                          🇹🇼 台灣訂單 (TWD)
                         </button>
                       </div>
 
@@ -1364,7 +1364,7 @@
                       </div>
                       
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">訂單編號</label><input type="text" value={activeDraft.orderNumber} onChange={(e) => handleOrderFormChange('orderNumber', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" placeholder="" /></div>
+                        <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">訂單編號</label><input type="text" value={activeDraft.orderNumber} onChange={(e) => handleOrderFormChange('orderNumber', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                         <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">暱稱</label><input type="text" value={activeDraft.nickname} onChange={(e) => handleOrderFormChange('nickname', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                       </div>
                       
@@ -1524,7 +1524,7 @@
                         <input type="text" value={activeDraft.zipCode} onChange={(e) => handleOrderFormChange('zipCode', e.target.value)} className="w-1/2 sm:w-1/3 px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" />
                       </div>
                       <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">收件地址1</label><input type="text" value={activeDraft.address1} onChange={(e) => handleOrderFormChange('address1', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
-                      <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">收件地址2</label><input type="text" value={activeDraft.address2} onChange={(e) => handleOrderFormChange('address2', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" placeholder="" /></div>
+                      <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">收件地址2</label><input type="text" value={activeDraft.address2} onChange={(e) => handleOrderFormChange('address2', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium" /></div>
                       <div><label className="block font-semibold text-slate-600 mb-1 text-[12px]">備註</label><textarea rows="2" value={activeDraft.notes} onChange={(e) => handleOrderFormChange('notes', e.target.value)} className="w-full px-3 py-2 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white outline-none font-medium"></textarea></div>
 
                       <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
