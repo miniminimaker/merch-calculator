@@ -617,7 +617,8 @@
             setEditingOrderId(null);
             setExportNotice("已成功更新訂單！");
           } else {
-            setOrders([orderToSave, ...orders]);
+            // 原本是 [orderToSave, ...orders]，改為 [...orders, orderToSave] 讓新訂單接在後面
+            setOrders([...orders, orderToSave]);
             setExportNotice("已成功新增訂單！");
           }
           setTimeout(() => setExportNotice(''), 3000);
